@@ -689,12 +689,6 @@ class NotificationReaderService : NotificationListenerService() {
                 detectNotificationType(sbn)
             }
 
-            // [SKIP] Native HyperOS already renders a media island; avoid duplicate.
-            if (type == NotificationType.MEDIA) {
-                Log.d(TAG, "Skipping MEDIA (native HyperOS island handles it)")
-                return
-            }
-
             // --- LAYERED TRIGGERS LOGIC ---
             val effectiveTypes = getEffectiveTypes(sbn.packageName)
             if (!effectiveTypes.contains(type.name)) {
