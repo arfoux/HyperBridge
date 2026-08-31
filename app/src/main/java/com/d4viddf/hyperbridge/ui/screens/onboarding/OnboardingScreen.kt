@@ -546,6 +546,7 @@ fun TriggersConfigPage(prefs: AppPreferences) {
                                         NotificationType.CALL -> R.string.type_call_desc
                                         NotificationType.TIMER -> R.string.type_timer_desc
                                         NotificationType.MESSAGE -> R.string.type_message_desc
+                                        NotificationType.DELIVERY -> R.string.type_delivery_desc
                                     }
                                     Text(
                                         stringResource(descRes),

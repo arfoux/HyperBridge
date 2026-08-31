@@ -95,6 +95,7 @@
     <string name="type_nav">Maps &amp; GPS</string>
     <string name="type_call">Calls</string>
     <string name="type_timer">Timers &amp; Alarms</string>
+    <string name="type_delivery">Food &amp; Delivery</string>
 
     <string name="download_complete">Download Complete</string>
     <string name="downloading">Downloading</string>
@@ -647,6 +648,7 @@
     <string name="type_nav_desc">Turn-by-turn directions and ETA</string>
     <string name="type_call_desc">Incoming and ongoing phone calls</string>
     <string name="type_timer_desc">Active timers and stopwatches</string>
+    <string name="type_delivery_desc">Food delivery and order tracking</string>
     <string name="select_triggered_events">Select triggered events</string>
     <string name="override_global_triggers">Override Global Triggers</string>
     <string name="override_global_trigger_desc">Set custom allowed notifications for this app</string>

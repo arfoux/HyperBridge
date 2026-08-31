@@ -161,9 +161,9 @@ class MediaTranslator(context: Context) : BaseTranslator(context) {
     // --- HELPERS ---
 
     private fun toHex(color: Int): String {
-        // Format to #RRGGBB (ignoring alpha for safety in some UI libs, or keep alpha if needed)
-        // Using 0xFFFFFF mask ensures we get clean hex
-        return String.format("#%06X", (0xFFFFFF and color))
+        // Format to #AARRGGBB so transparency (alpha) is preserved. Previously the alpha
+        // was masked off (#RRGGBB), which forced every island background opaque.
+        return String.format("#%08X", color)
     }
 
     private fun getRoundedCornerBitmap(bitmap: Bitmap, pixels: Float): Bitmap {

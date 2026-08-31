@@ -75,6 +75,7 @@
     <string name="type_nav">Peta &amp; GPS</string>
     <string name="type_call">Panggilan</string>
     <string name="type_timer">Pewaktu &amp; Alarm</string>
+    <string name="type_delivery">Makanan &amp; Antar</string>
     <string name="download_complete">Unduhan Selesai</string>
     <string name="downloading">Mengunduh</string>
     <string name="maps_title">Peta</string>
@@ -521,6 +522,7 @@ Penulisan ulang total logika inti untuk stabilitas yang lebih baik.\n
     <string name="type_nav_desc">Petunjuk arah langkah demi langkah dan perkiraan waktu tiba</string>
     <string name="type_call_desc">Panggilan masuk dan panggilan yang sedang berlangsung</string>
     <string name="type_timer_desc">Pengatur waktu dan stopwatch yang aktif</string>
+    <string name="type_delivery_desc">Antar makanan dan pelacakan pesanan</string>
     <string name="select_triggered_events">Pilih event yang terpicu</string>
     <string name="override_global_triggers">Mengganti Pemicu Global</string>
     <string name="override_global_trigger_desc">Atur pemberitahuan yang diizinkan secara khusus untuk aplikasi ini</string>

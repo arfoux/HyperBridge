@@ -37,6 +37,7 @@ import com.d4viddf.hyperbridge.service.translators.MediaTranslator
 import com.d4viddf.hyperbridge.service.translators.MessageTranslator
 import com.d4viddf.hyperbridge.service.translators.NavTranslator
 import com.d4viddf.hyperbridge.service.translators.ProgressTranslator
+import com.d4viddf.hyperbridge.service.translators.DeliveryTranslator
 import com.d4viddf.hyperbridge.service.translators.DownloadTranslator
 import com.d4viddf.hyperbridge.service.translators.StandardTranslator
 import com.d4viddf.hyperbridge.service.translators.TimerTranslator
@@ -118,6 +119,7 @@ class NotificationReaderService : NotificationListenerService() {
     private lateinit var standardTranslator: StandardTranslator
     private lateinit var messageTranslator: MessageTranslator
     private lateinit var mediaTranslator: MediaTranslator
+    private lateinit var deliveryTranslator: DeliveryTranslator
     private lateinit var widgetTranslator: WidgetTranslator
     private lateinit var liveUpdateTranslator: LiveUpdateTranslator
 
@@ -200,6 +202,7 @@ class NotificationReaderService : NotificationListenerService() {
         liveUpdateTranslator = LiveUpdateTranslator(this, themeRepository)
 
         mediaTranslator = MediaTranslator(this)
+        deliveryTranslator = DeliveryTranslator(this, themeRepository)
         widgetTranslator = WidgetTranslator(this)
 
         val userManager = getSystemService(USER_SERVICE) as android.os.UserManager
@@ -445,8 +448,9 @@ class NotificationReaderService : NotificationListenerService() {
 
                     val islandType = activeIslands[notifKey]?.type
                     val forceDismiss = islandType == NotificationType.CALL || 
-                                       islandType == NotificationType.MEDIA || 
-                                       islandType == NotificationType.NAVIGATION
+                                        islandType == NotificationType.MEDIA || 
+                                        islandType == NotificationType.NAVIGATION ||
+                                        islandType == NotificationType.DELIVERY
 
                     if (finalConfig.dismissWithOriginal == true || forceDismiss) {
                         // Debounce updates if the app canceled it programmatically
@@ -685,6 +689,12 @@ class NotificationReaderService : NotificationListenerService() {
                 detectNotificationType(sbn)
             }
 
+            // [SKIP] Native HyperOS already renders a media island; avoid duplicate.
+            if (type == NotificationType.MEDIA) {
+                Log.d(TAG, "Skipping MEDIA (native HyperOS island handles it)")
+                return
+            }
+
             // --- LAYERED TRIGGERS LOGIC ---
             val effectiveTypes = getEffectiveTypes(sbn.packageName)
             if (!effectiveTypes.contains(type.name)) {
@@ -850,6 +860,7 @@ class NotificationReaderService : NotificationListenerService() {
                 NotificationType.DOWNLOAD -> downloadTranslator.translate(sbn, effectiveTitle, picKey, finalConfig, activeTheme, isUpdate)
                 NotificationType.MEDIA -> mediaTranslator.translate(sbn, picKey, finalConfig)
                 NotificationType.MESSAGE -> messageTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
+                NotificationType.DELIVERY -> deliveryTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
 
@@ -1002,15 +1013,31 @@ class NotificationReaderService : NotificationListenerService() {
         val isTimer = (extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) || n.category == Notification.CATEGORY_ALARM) && n.`when` > 0
         val isMedia = template.contains("MediaStyle") || n.category == Notification.CATEGORY_TRANSPORT
         val isMessage = n.category == Notification.CATEGORY_MESSAGE || template == "android.app.Notification.MessagingStyle"
-        
+        // ShopeeFood confirmed NOT natively supported on HyperOS 3 -> HyperBridge handles it.
+        // DELIVERY detected like any other built-in type: via the standard Android 16
+        // ProgressStyle template (documented use cases: rideshare, delivery, navigation),
+        // the same way MEDIA is detected via the MediaStyle template. Also via generic
+        // Live Activity (extra_live_activity_id) which ShopeeFood uses
+        // (SHOPEE_LIVE_ACTIVITY_ID, DecoratedCustomViewStyle). No package guessing.
+        val isProgressStyle = template == "android.app.Notification\$ProgressStyle"
+        val isLiveActivity = extras.containsKey("extra_live_activity_id")
+
         val title = resolveTitle(sbn)
         val text = resolveText(extras)
         val isDownload = isDownloadNotification(sbn, title, text)
         val hasProgress = hasProgressNotification(sbn, title, text)
 
+        // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device
+        if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity) {
+            Log.d(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} cat=${n.category} tpl=$template title='$title' text='$text' progress=$hasProgress live=$isLiveActivity")
+        }
+
         return when {
             isCall -> NotificationType.CALL
             isNav -> NotificationType.NAVIGATION
+            isMessage -> NotificationType.MESSAGE
+            isProgressStyle -> NotificationType.DELIVERY
+            isLiveActivity -> NotificationType.DELIVERY
             isTimer -> NotificationType.TIMER
             isMedia -> NotificationType.MEDIA
             isMessage -> NotificationType.MESSAGE
