@@ -46,7 +46,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         )
         val title = effectiveTitle.ifEmpty {
             extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim()
-                ?: context.getString(R.string.delivery_title)
+                ?: context.getString(R.string.type_delivery)
         }
         val text = effectiveText.ifEmpty {
             extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
