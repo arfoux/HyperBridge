@@ -69,9 +69,18 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             val rv: RemoteViews? = sbn.notification.bigContentView ?: sbn.notification.contentView
             if (rv != null) {
                 builder.setCustomIslandExpandRemoteView(rv)
-                // Small island custom: kiri ShopeeFood | DKRIUK, kanan per stage, body gaada
+                // Small island custom: headerIcon (logo) | DKRIUK, kanan per stage, body gaada
                 val tinyRv = RemoteViews(context.packageName, R.layout.layout_delivery_tiny)
-                tinyRv.setTextViewText(R.id.tiny_left, "ShopeeFood | DKRIUK KS TUBUN")
+                // Logo headerIcon persegi panjang (ambil app icon Shopee)
+                try {
+                    val drawable = context.packageManager.getApplicationIcon(sbn.packageName)
+                    val bmp = drawable.toBitmap(48, 48)
+                    tinyRv.setImageViewBitmap(R.id.tiny_logo, bmp)
+                } catch (_: Exception) { }
+                // Resto dinamis: parse dari text "DKRIUK ... sedang menyiapkan", fallback ke headerText cache
+                val resto = Regex("""^(.+?)\s+sedang menyiapkan""").find(text)?.groupValues?.get(1)?.trim()
+                    ?: "DKRIUK KS TUBUN"
+                tinyRv.setTextViewText(R.id.tiny_resto, resto)
                 val rightText = when {
                     title.contains("Resto sedang menyiapkan") -> {
                         val m = Regex("""(\d+)\s*menit""").find(text)?.groupValues?.get(1) ?: "32"
