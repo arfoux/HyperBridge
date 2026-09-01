@@ -3,6 +3,7 @@ package com.d4viddf.hyperbridge.service.translators
 import android.app.Notification
 import android.content.Context
 import android.service.notification.StatusBarNotification
+import android.widget.RemoteViews
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.theme.ThemeRepository
 import com.d4viddf.hyperbridge.models.HyperIslandData
@@ -23,7 +24,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         effectiveText: String,
         picKey: String,
         config: IslandConfig,
-        theme: HyperTheme?
+        theme: HyperTheme?,
+        useRemoteViews: Boolean = false
     ): HyperIslandData {
 
         // 1. Resolve Theme Colors
@@ -61,6 +63,20 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
+
+        // Opsi RemoteViews 1:1 — jika diminta dan ada custom view, pakai view asli untuk big island
+        if (useRemoteViews) {
+            val rv: RemoteViews? = sbn.notification.bigContentView ?: sbn.notification.contentView
+            if (rv != null) {
+                builder.setCustomIslandExpandRemoteView(rv)
+                builder.addPicture(resolveIcon(sbn, picKey))
+                builder.addPicture(getTransparentPicture("hidden_pixel"))
+                builder.setSmallIsland(picKey)
+                builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
+                builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
+                return HyperIslandData(builder.buildCustomExtras(), builder.buildJsonParam())
+            }
+        }
 
         // 3. Picture (app icon / large icon)
         builder.addPicture(resolveIcon(sbn, picKey))

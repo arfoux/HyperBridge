@@ -854,7 +854,7 @@ class NotificationReaderService : NotificationListenerService() {
                 NotificationType.DOWNLOAD -> downloadTranslator.translate(sbn, effectiveTitle, picKey, finalConfig, activeTheme, isUpdate)
                 NotificationType.MEDIA -> mediaTranslator.translate(sbn, picKey, finalConfig)
                 NotificationType.MESSAGE -> messageTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
-                NotificationType.DELIVERY -> deliveryTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
+                NotificationType.DELIVERY -> deliveryTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme, useRemoteViews = true)
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
 
