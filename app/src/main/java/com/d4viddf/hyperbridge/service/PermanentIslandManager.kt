@@ -98,12 +98,9 @@ class PermanentIslandManager(
     // superseded it, or a re-post landed too soon after a cancel). So on a discrete
     // transition (screen on / unlock / (re)connect) callers pass refresh=true to re-assert
     // the island even when present; the periodic tick passes false, trusting presence.
-    // Bridged islands deliberately do NOT hide the permanent island: HyperOS shows the newest
-    // focus island on top, so keeping 9999 posted makes the permanent island reappear instantly
-    // when a bridged island collapses or expires (removing it would leave a gap until the TTL).
     private fun desiredActive(): Boolean {
         val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        return isPermanentIslandEnabled && !hasNativeIsland && !(isHideInLandscapeEnabled && isLandscape)
+        return isPermanentIslandEnabled && !hasNativeIsland && currentRealNotifications == 0 && !(isHideInLandscapeEnabled && isLandscape)
     }
 
     @Synchronized
