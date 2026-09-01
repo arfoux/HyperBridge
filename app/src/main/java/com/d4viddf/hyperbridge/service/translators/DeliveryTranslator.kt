@@ -64,14 +64,27 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
 
-        // Opsi RemoteViews 1:1 — jika diminta dan ada custom view, pakai view asli untuk big island
+        // Opsi RemoteViews 1:1 — big island pakai view asli, small island custom kiri/kanan per stage
         if (useRemoteViews) {
             val rv: RemoteViews? = sbn.notification.bigContentView ?: sbn.notification.contentView
             if (rv != null) {
                 builder.setCustomIslandExpandRemoteView(rv)
+                // Small island custom: kiri ShopeeFood | DKRIUK, kanan per stage, body gaada
+                val tinyRv = RemoteViews(context.packageName, R.layout.layout_delivery_tiny)
+                tinyRv.setTextViewText(R.id.tiny_left, "ShopeeFood | DKRIUK KS TUBUN")
+                val rightText = when {
+                    title.contains("Resto sedang menyiapkan") -> {
+                        val m = Regex("""(\d+)\s*menit""").find(text)?.groupValues?.get(1) ?: "32"
+                        "Menyiapkan • ${m}m"
+                    }
+                    title.contains("Pesananmu sedang dalam perjalanan") -> "Diantar • 20m"
+                    title.contains("Selamat menikmati") -> "Selesai"
+                    else -> "Delivery"
+                }
+                tinyRv.setTextViewText(R.id.tiny_right, rightText)
+                builder.setCustomTinyRemoteView(tinyRv)
                 builder.addPicture(resolveIcon(sbn, picKey))
                 builder.addPicture(getTransparentPicture("hidden_pixel"))
-                builder.setSmallIsland(picKey)
                 builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
                 builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
                 return HyperIslandData(builder.buildCustomExtras(), builder.buildJsonParam())
