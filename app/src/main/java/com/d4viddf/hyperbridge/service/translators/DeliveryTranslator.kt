@@ -77,10 +77,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                     val bmp = drawable.toBitmap()
                     tinyRv.setImageViewBitmap(R.id.tiny_logo, bmp)
                 } catch (_: Exception) { }
-                // Resto dinamis: parse dari text "DKRIUK ... sedang menyiapkan", fallback ke headerText cache
-                val resto = Regex("""^(.+?)\s+sedang menyiapkan""").find(text)?.groupValues?.get(1)?.trim()
-                    ?: "DKRIUK KS TUBUN"
-                tinyRv.setTextViewText(R.id.tiny_resto, resto)
+                // Resto dinamis dari text "DKRIUK ... sedang menyiapkan" (headerText: DKRIUK KS TUBUN + split | ada di custom view, bukan hardcode)
+                val resto = Regex("""^(.+?)\s+sedang menyiapkan""").find(text)?.groupValues?.get(1)?.trim().orEmpty()
+                if (resto.isNotEmpty()) tinyRv.setTextViewText(R.id.tiny_resto, resto)
                 val rightText = when {
                     title.contains("Resto sedang menyiapkan") -> {
                         val m = Regex("""(\d+)\s*menit""").find(text)?.groupValues?.get(1) ?: "32"
