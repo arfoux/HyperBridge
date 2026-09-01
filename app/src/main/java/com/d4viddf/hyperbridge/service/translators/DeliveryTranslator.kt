@@ -71,10 +71,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 builder.setCustomIslandExpandRemoteView(rv)
                 // Small island custom: headerIcon (logo) | DKRIUK, kanan per stage, body gaada
                 val tinyRv = RemoteViews(context.packageName, R.layout.layout_delivery_tiny)
-                // Logo headerIcon persegi panjang (ambil app icon Shopee)
+                // Logo headerIcon persegi panjang 239×44 (ambil app icon Shopee, scale fitCenter)
                 try {
                     val drawable = context.packageManager.getApplicationIcon(sbn.packageName)
-                    val bmp = drawable.toBitmap(48, 48)
+                    val bmp = drawable.toBitmap()
                     tinyRv.setImageViewBitmap(R.id.tiny_logo, bmp)
                 } catch (_: Exception) { }
                 // Resto dinamis: parse dari text "DKRIUK ... sedang menyiapkan", fallback ke headerText cache

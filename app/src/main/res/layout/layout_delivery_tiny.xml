@@ -9,8 +9,9 @@
 
     <ImageView
         android:id="@+id/tiny_logo"
-        android:layout_width="18dp"
-        android:layout_height="18dp"
+        android:layout_width="60dp"
+        android:layout_height="11dp"
+        android:scaleType="fitCenter"
         android:contentDescription="logo" />
 
     <TextView
