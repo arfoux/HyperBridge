@@ -271,10 +271,28 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch { preferences.setAppBlockedTerms(packageName, terms) }
     }
 
-    // App Loader
+    // App Loader - now includes system apps like com.android.shell when needed
     private suspend fun getLaunchableApps(): List<AppInfo> = withContext(Dispatchers.IO) {
         val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-        val resolveInfos = packageManager.queryIntentActivities(intent, 0)
+        val resolveInfos = packageManager.queryIntentActivities(intent, 0).toMutableList()
+        // Also include system packages like shell for manual testing/fake notifs
+        try {
+            val sysPkgs = packageManager.getInstalledApplications(0).filter {
+                it.packageName == "com.android.shell" && resolveInfos.none { r -> r.activityInfo.packageName == it.packageName }
+            }
+            sysPkgs.forEach { appInfo ->
+                val ri = android.content.pm.ResolveInfo().apply {
+                    activityInfo = android.content.pm.ActivityInfo().apply {
+                        packageName = appInfo.packageName
+                        name = appInfo.name ?: appInfo.packageName
+                        applicationInfo = appInfo
+                    }
+                }
+                // Use appInfo label/icon via packageManager
+                resolveInfos.add(ri)
+            }
+        } catch (_: Exception) { }
+
 
         resolveInfos.mapNotNull { resolveInfo ->
             try {
