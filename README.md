@@ -30,12 +30,16 @@
   <a href="https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip">
     <img src="https://img.shields.io/badge/Download-Nightly%20APK-00C853?style=for-the-badge&logo=android&logoColor=white" alt="Download Nightly APK" />
   </a>
+  <a href="https://github.com/arfoux/HyperBridge/releases/tag/nightly">
+    <img src="https://img.shields.io/badge/Download-Nightly%20Release-FF6D00?style=for-the-badge&logo=github&logoColor=white" alt="Nightly Release" />
+  </a>
   <a href="https://github.com/arfoux/HyperBridge/releases/latest">
     <img src="https://img.shields.io/github/v/release/arfoux/HyperBridge?display_name=tag&label=Latest%20Release&style=for-the-badge&color=1976D2" alt="Latest Release" />
   </a>
 </p>
 <p align="center">
   <a href="https://github.com/arfoux/HyperBridge/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/arfoux/HyperBridge/build.yml?label=Build%20Debug%20APK&style=flat-square" alt="Build Status" /></a>
+  <a href="https://github.com/arfoux/HyperBridge/actions/workflows/nightly.yml"><img src="https://img.shields.io/github/actions/workflow/status/arfoux/HyperBridge/nightly.yml?label=Nightly&style=flat-square" alt="Nightly Status" /></a>
   <img src="https://img.shields.io/github/last-commit/arfoux/HyperBridge?style=flat-square" alt="Last Commit" />
 </p>
 
@@ -116,7 +120,9 @@ The easiest way to install and keep the app updated.
 
 ### Option 2: Manual APK
 1.  Download the latest APK from the [Releases](https://github.com/arfoux/HyperBridge/releases) page — look for `HyperBridge-vX.X.X.apk`.
-2.  **Or download the latest dev build directly:** [📥 Nightly APK (via nightly.link)](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip) — auto-built from `master` on every push (if GitHub artifact limit blocks direct download, use this link).
+2.  **Or download the latest dev build directly:**
+    - [📥 Nightly Release (recommended, permanent)](https://github.com/arfoux/HyperBridge/releases/tag/nightly) — `HyperBridge-nightly.apk`, updated on every push to `master` (rolling, no expiry).
+    - [📥 Nightly APK via nightly.link](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip) — artifact `app-debug.zip` (expires in 14 days, fallback).
 3.  Install the APK on your Xiaomi/POCO/Redmi device.
 
 ### ⚙️ Setup (Required for both methods)

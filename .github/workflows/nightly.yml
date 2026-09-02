@@ -1,0 +1,66 @@
+name: Nightly Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    if: github.repository == 'arfoux/HyperBridge'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Prepare nightly APK
+        shell: bash
+        run: |
+          ls -lh app/build/outputs/apk/debug/
+          mkdir -p dist
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/HyperBridge-nightly-${SHORT_SHA}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/HyperBridge-nightly.apk"
+          ls -lh dist/
+
+      - name: Publish nightly release (continuous)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly Build"
+          body: |
+            Auto-built from `master` — commit `${{ github.sha }}`
+
+            - Direct APK: `HyperBridge-nightly.apk` (latest)
+            - Versioned: `HyperBridge-nightly-<sha>.apk`
+            - Also via [nightly.link](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip)
+
+            This is a rolling pre-release updated on every push to `master`.
+          files: dist/*.apk
+          prerelease: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
