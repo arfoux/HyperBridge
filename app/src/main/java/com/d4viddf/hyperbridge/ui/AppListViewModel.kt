@@ -275,10 +275,10 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun getLaunchableApps(): List<AppInfo> = withContext(Dispatchers.IO) {
         val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
         val resolveInfos = packageManager.queryIntentActivities(intent, 0).toMutableList()
-        // Also include system packages like shell for manual testing/fake notifs
+        // Include all system apps so they can be checklist-enabled (no special case)
         try {
             val sysPkgs = packageManager.getInstalledApplications(0).filter {
-                it.packageName == "com.android.shell" && resolveInfos.none { r -> r.activityInfo.packageName == it.packageName }
+                (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 && resolveInfos.none { r -> r.activityInfo.packageName == it.packageName }
             }
             sysPkgs.forEach { appInfo ->
                 val ri = android.content.pm.ResolveInfo().apply {
