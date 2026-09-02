@@ -19,11 +19,24 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.0-blue?style=for-the-badge&logo=github" alt="Version 0.5.0" />
+  <img src="https://img.shields.io/badge/version-0.5.8-blue?style=for-the-badge&logo=github" alt="Version 0.5.8" />
   <img src="https://img.shields.io/badge/kotlin-%237F52FF.svg?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/Material%20Design-757575?style=for-the-badge&logo=material-design&logoColor=white" alt="Material Design" />
   <a href="https://crowdin.com/project/hyper-bridge"><img src="https://badges.crowdin.net/hyper-bridge/localized.svg" alt="Crowdin" /></a>
+</p>
+
+<p align="center">
+  <a href="https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip">
+    <img src="https://img.shields.io/badge/Download-Nightly%20APK-00C853?style=for-the-badge&logo=android&logoColor=white" alt="Download Nightly APK" />
+  </a>
+  <a href="https://github.com/arfoux/HyperBridge/releases/latest">
+    <img src="https://img.shields.io/github/v/release/arfoux/HyperBridge?display_name=tag&label=Latest%20Release&style=for-the-badge&color=1976D2" alt="Latest Release" />
+  </a>
+</p>
+<p align="center">
+  <a href="https://github.com/arfoux/HyperBridge/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/arfoux/HyperBridge/build.yml?label=Build%20Debug%20APK&style=flat-square" alt="Build Status" /></a>
+  <img src="https://img.shields.io/github/last-commit/arfoux/HyperBridge?style=flat-square" alt="Last Commit" />
 </p>
 
 <br>
@@ -102,8 +115,9 @@ The easiest way to install and keep the app updated.
 <a href='https://play.google.com/store/apps/details?id=com.d4viddf.hyperbridge'><img alt='Get it on Google Play' src='https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png' height="60"/></a>
 
 ### Option 2: Manual APK
-1.  Download the latest APK from the [Releases](https://github.com/D4vidDf/HyperBridge/releases) page.
-2.  Install the APK on your Xiaomi/POCO/Redmi device.
+1.  Download the latest APK from the [Releases](https://github.com/arfoux/HyperBridge/releases) page — look for `HyperBridge-vX.X.X.apk`.
+2.  **Or download the latest dev build directly:** [📥 Nightly APK (via nightly.link)](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip) — auto-built from `master` on every push (if GitHub artifact limit blocks direct download, use this link).
+3.  Install the APK on your Xiaomi/POCO/Redmi device.
 
 ### ⚙️ Setup (Required for both methods)
 1.  Grant **"Notification Access"** when prompted.
