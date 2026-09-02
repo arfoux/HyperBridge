@@ -120,7 +120,7 @@ class PermanentIslandManager(
             return
         }
         isIslandActive = isIslandPresent
-        Log.d(TAG, "updateState: shouldShow=$shouldShow, isLandscape=$isLandscape, isHideInLandscapeEnabled=$isHideInLandscapeEnabled")
+        Log.d(TAG, "updateState: shouldShow=$shouldShow enabled=$isPermanentIslandEnabled hasNative=$hasNativeIsland count=$currentRealNotifications isLandscape=$isLandscape hideLandscape=$isHideInLandscapeEnabled")
         updateStateLocked()
     }
 
