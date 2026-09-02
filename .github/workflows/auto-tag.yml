@@ -60,3 +60,22 @@ jobs:
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
           echo "Pushed tag $TAG"
+
+      # GITHUB_TOKEN push tidak trigger workflow push tags (proteksi loop), jadi trigger Release via workflow_dispatch
+      # Release akan reuse artifact dari Build Debug APK (hemat 1x build) tapi tetap publish ke Releases (tanpa login)
+      - name: Trigger Release workflow (efficient, reuse artifact)
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          echo "Dispatching Release APK for $TAG (reuse Build artifact)"
+          if gh workflow run "Release APK" --ref master -f tag="$TAG" 2>/dev/null; then
+            echo "Dispatched via gh"
+          else
+            echo "gh failed, fallback via API"
+            curl -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/release.yml/dispatches \
+              -d "{\"ref\":\"master\",\"inputs\":{\"tag\":\"$TAG\"}}" || true
+          fi

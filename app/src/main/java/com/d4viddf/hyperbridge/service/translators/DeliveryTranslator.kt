@@ -3,7 +3,6 @@ package com.d4viddf.hyperbridge.service.translators
 import android.app.Notification
 import android.content.Context
 import android.service.notification.StatusBarNotification
-import android.widget.RemoteViews
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.theme.ThemeRepository
 import com.d4viddf.hyperbridge.models.HyperIslandData
@@ -24,8 +23,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         effectiveText: String,
         picKey: String,
         config: IslandConfig,
-        theme: HyperTheme?,
-        useRemoteViews: Boolean = false
+        theme: HyperTheme?
     ): HyperIslandData {
 
         // 1. Resolve Theme Colors
@@ -63,54 +61,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
-
-        // Opsi RemoteViews 1:1 — big island pakai view asli, small island custom kiri/kanan per stage
-        // Fallback ke layout standard jika hook/CustomExtras tidak didukung device
-        if (useRemoteViews) {
-            try {
-                val rv: RemoteViews? = sbn.notification.bigContentView ?: sbn.notification.contentView
-                if (rv != null) {
-                    builder.setCustomIslandExpandRemoteView(rv)
-                    // Small island custom: headerIcon (logo) | DKRIUK, kanan per stage, body gaada
-                    val tinyRv = RemoteViews(context.packageName, R.layout.layout_delivery_tiny)
-                    // Logo headerIcon persegi panjang 239×44 (ambil app icon Shopee, scale fitCenter)
-                    try {
-                        val drawable = context.packageManager.getApplicationIcon(sbn.packageName)
-                        val bmp = drawable.toBitmap()
-                        tinyRv.setImageViewBitmap(R.id.tiny_logo, bmp)
-                    } catch (_: Exception) { }
-                    // Resto dinamis dari text "DKRIUK ... sedang menyiapkan" (headerText: DKRIUK KS TUBUN + split | ada di custom view, bukan hardcode)
-                    val resto = Regex("""^(.+?)\s+sedang menyiapkan""").find(text)?.groupValues?.get(1)?.trim().orEmpty()
-                    if (resto.isNotEmpty()) tinyRv.setTextViewText(R.id.tiny_resto, resto)
-                    val rightText = when {
-                        title.contains("Resto sedang menyiapkan") -> {
-                            val m = Regex("""(\d+)\s*menit""").find(text)?.groupValues?.get(1) ?: "32"
-                            "Menyiapkan • ${m}m"
-                        }
-                        title.contains("Pesananmu sedang dalam perjalanan") -> "Diantar • 20m"
-                        title.contains("Selamat menikmati") -> "Selesai"
-                        else -> "Delivery"
-                    }
-                    tinyRv.setTextViewText(R.id.tiny_right, rightText)
-                    builder.setCustomTinyRemoteView(tinyRv)
-                    builder.addPicture(resolveIcon(sbn, picKey))
-                    builder.addPicture(getTransparentPicture("hidden_pixel"))
-                    builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
-                    builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
-                    val customExtras = try { builder.buildCustomExtras() } catch (e: Exception) {
-                        android.util.Log.w("HyperBridgeDebug", "DELIVERY customExtras failed, fallback to standard", e)
-                        null
-                    }
-                    if (customExtras != null) {
-                        return HyperIslandData(customExtras, builder.buildJsonParam())
-                    } else {
-                        android.util.Log.w("HyperBridgeDebug", "DELIVERY customExtras null, fallback to standard pkg=${sbn.packageName}")
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("HyperBridgeDebug", "DELIVERY RemoteViews path failed, fallback", e)
-            }
-        }
 
         // 3. Picture (app icon / large icon)
         builder.addPicture(resolveIcon(sbn, picKey))
