@@ -583,7 +583,9 @@ class NotificationReaderService : NotificationListenerService() {
     }
 
     private fun updatePermanentIsland() {
-        permanentIslandManager.onActiveNotificationsChanged(activeIslands.size + activeWidgets.size, nativeIslands.isNotEmpty())
+        // Tethering pill (android HOTSPOT) harus block permanent, Shopee voucher STANDARD bukan pill jangan block
+        val pillCount = activeIslands.values.count { it.type != NotificationType.STANDARD && it.type != NotificationType.MESSAGE } + activeWidgets.size
+        permanentIslandManager.onActiveNotificationsChanged(pillCount, nativeIslands.isNotEmpty())
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         logStateChange(isLandscape)
     }
@@ -611,6 +613,18 @@ class NotificationReaderService : NotificationListenerService() {
                     val template = extras.getString(Notification.EXTRA_TEMPLATE)
                     if (template == "androidx.media.app.NotificationCompat\$MediaStyle" ||
                         template == "android.app.Notification\$MediaStyle") {
+                        isNative = true
+                    }
+                }
+                // Universal: pill HyperOS (focusType=PARAMS) tidak selalu punya miui.focus.param di extras (contoh android HOTSPOT_NOTIFICATION, charging)
+                // Anggap semua ONGOING_EVENT dari android/system sebagai pill biar permanent tidak muncul bareng tethering/charging
+                if (!isNative && it.packageName == "android" && (it.notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) {
+                    isNative = true
+                }
+                // Juga untuk system packages lain yang ongoing (misound charging) — universal ongoing tanpa AUTO_CANCEL dianggap pill
+                if (!isNative && (it.notification.flags and Notification.FLAG_ONGOING_EVENT) != 0 && (it.notification.flags and Notification.FLAG_AUTO_CANCEL) == 0) {
+                    // Hanya untuk system/ongoing yang bukan HyperBridge STANDARD/MESSAGE (voucher Shopee AUTO_CANCEL tidak masuk)
+                    if (it.packageName == "com.miui.misound" || it.packageName == "com.miui.securitycenter" || it.packageName == "com.xiaomi.mirror") {
                         isNative = true
                     }
                 }
