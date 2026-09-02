@@ -1,0 +1,104 @@
+name: Release APK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (contoh: v0.5.8) - kosongkan untuk pakai versionName dari build.gradle"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+            echo "tag=v$VER" >> $GITHUB_OUTPUT
+          fi
+          echo "Resolved tag: $(cat $GITHUB_OUTPUT)"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Build Release APK (unsigned/minified, optional)
+        continue-on-error: true
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Prepare APKs
+        shell: bash
+        run: |
+          ls -lh app/build/outputs/apk/debug/ || true
+          ls -lh app/build/outputs/apk/release/ || true
+          mkdir -p dist
+          TAG="${{ steps.tag.outputs.tag }}"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/HyperBridge-${TAG}-debug.apk" || true
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk "dist/HyperBridge-${TAG}-release.apk" || true
+            cp app/build/outputs/apk/release/app-release.apk "dist/HyperBridge-${TAG}.apk" || true
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk "dist/HyperBridge-${TAG}.apk" || true
+          fi
+          ls -lh dist/
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          PREV=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "## HyperBridge $TAG" > release_notes.md
+          echo "" >> release_notes.md
+          if [ -n "$PREV" ] && [ "$PREV" != "$TAG" ]; then
+            echo "### Changes since $PREV" >> release_notes.md
+            git log "$PREV"..HEAD --pretty=format:"- %s (%h)" >> release_notes.md || true
+          else
+            echo "### Changes" >> release_notes.md
+            git log --pretty=format:"- %s (%h)" -20 >> release_notes.md || true
+          fi
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### 📥 Download" >> release_notes.md
+          echo "- \`HyperBridge-${TAG}.apk\` — Universal APK (debug/release)" >> release_notes.md
+          echo "- Also available via [nightly.link](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip)" >> release_notes.md
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: HyperBridge ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.md
+          files: dist/*.apk
+          generate_release_notes: false
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
