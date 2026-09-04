@@ -5,9 +5,10 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [AppSetting::class], version = 1, exportSchema = false)
+@Database(entities = [AppSetting::class, SavedNotification::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
+    abstract fun savedNotificationDao(): SavedNotificationDao
 
     companion object {
         @Volatile
@@ -31,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     dbName
                 )
-                    .fallbackToDestructiveMigration(false)
+                    .fallbackToDestructiveMigration(true)
                     .build().also { INSTANCE = it }
             }
         }

@@ -746,6 +746,39 @@ class NotificationReaderService : NotificationListenerService() {
                 detectNotificationType(sbn)
             }
 
+            // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
+            val isTestNotif = extras.getBoolean("hyperbridge_test", false)
+            if (isTestNotif) {
+                Log.w("HyperBridgeTest", "TEST pkg=${sbn.packageName} type=$type title='$effectiveTitle' text='$effectiveText' ch=${sbn.notification.channelId} tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
+            } else {
+                Log.w("HyperBridgeDebug", "REAL pkg=${sbn.packageName} ch=${sbn.notification.channelId} type=$type title='$effectiveTitle' text='$effectiveText' tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
+            }
+            // Simpan ke history (50 terakhir, bedain isTest)
+            serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val db = com.d4viddf.hyperbridge.data.db.AppDatabase.getDatabase(this@NotificationReaderService)
+                    val entry = com.d4viddf.hyperbridge.data.db.SavedNotification(
+                        packageName = sbn.packageName,
+                        title = effectiveTitle,
+                        text = effectiveText,
+                        bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
+                        subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString(),
+                        channelId = sbn.notification.channelId,
+                        template = extras.getString(Notification.EXTRA_TEMPLATE),
+                        isTest = isTestNotif,
+                        detectedType = type.name,
+                        postTime = System.currentTimeMillis(),
+                        extrasJson = "test=$isTestNotif;live=${extras.getString("extra_live_activity_id")};customView=${extras.getBoolean("android.contains.customView")};progress=${extras.getInt(Notification.EXTRA_PROGRESS, 0)}/${extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)};big=${extras.getCharSequence(Notification.EXTRA_BIG_TEXT)}"
+                    )
+                    db.savedNotificationDao().insert(entry)
+                    val all = db.savedNotificationDao().getRecentSync()
+                    if (all.size > 50) {
+                        val cutoff = all.last().postTime
+                        db.savedNotificationDao().pruneBefore(cutoff)
+                    }
+                } catch (e: Exception) { Log.e("HyperBridgeDebug", "save history failed", e) }
+            }
+
             // --- LAYERED TRIGGERS LOGIC — fallback: Shopee DELIVERY eligible auto-allow jika channel/LIVE_ACTIVITY ---
             val effectiveTypes = getEffectiveTypes(sbn.packageName)
             if (!effectiveTypes.contains(type.name)) {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.DisplaySettings
 import androidx.compose.material.icons.outlined.DoNotDisturbOn
 import androidx.compose.material.icons.outlined.Edit
@@ -51,7 +52,8 @@ fun GlobalSettingsScreen(
     onIslandSettingsClick: () -> Unit,
     onEngineSettingsClick: () -> Unit,
     onDndSettingsClick: () -> Unit,
-    onPermanentIslandClick: () -> Unit
+    onPermanentIslandClick: () -> Unit,
+    onTestIslandsClick: () -> Unit = {}
 ) {
 
     Scaffold(
@@ -118,6 +120,14 @@ fun GlobalSettingsScreen(
                 icon = Icons.Outlined.PushPin,
                 shape = getExpressiveShape(6, 5, ShapeStyle.Large),
                 onClick = onPermanentIslandClick
+            )
+            Spacer(Modifier.height(2.dp))
+            ListOptionCard(
+                title = "Test Pill — Semua Kategori",
+                subtitle = "Coba pill DELIVERY clone Shopee persis + logo, bedain log TEST vs REAL, simpan notif",
+                icon = Icons.Outlined.BugReport,
+                shape = getExpressiveShape(6, 6, ShapeStyle.Large),
+                onClick = onTestIslandsClick
             )
             Spacer(Modifier.height(16.dp))
             

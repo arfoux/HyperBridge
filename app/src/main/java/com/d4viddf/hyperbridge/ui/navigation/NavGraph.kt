@@ -71,7 +71,8 @@ fun mainNavGraph(
             onIslandSettingsClick = { navigator.navigate(Screen.IslandSettings) },
             onEngineSettingsClick = { navigator.navigate(Screen.EngineSettings) },
             onDndSettingsClick = { navigator.navigate(Screen.DndSettings) },
-            onPermanentIslandClick = { navigator.navigate(Screen.PermanentIslandConfig) }
+            onPermanentIslandClick = { navigator.navigate(Screen.PermanentIslandConfig) },
+            onTestIslandsClick = { navigator.navigate(Screen.TestIslands) }
         )
     }
     entry<Screen.DndSettings> {
@@ -150,5 +151,8 @@ fun mainNavGraph(
     }
     entry<Screen.IslandSettings> {
         IslandSettingsScreen(onBack = { navigator.goBack() })
+    }
+    entry<Screen.TestIslands> {
+        com.d4viddf.hyperbridge.ui.screens.settings.TestIslandScreen(onBack = { navigator.goBack() })
     }
 }
