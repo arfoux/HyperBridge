@@ -601,4 +601,9 @@ class AppPreferences(context: Context) {
     fun useNativeLiveUpdatesSync(): Boolean {
         return memoryCache[USE_NATIVE_ENGINE]?.toBoolean() ?: false
     }
+
+    // --- TEST: Save REAL notifications toggle ---
+    val saveRealNotificationsFlow: Flow<Boolean> = dao.getSettingFlow(SettingsKeys.SAVE_REAL_NOTIFICATIONS).map { it?.toBooleanStrictOrNull() ?: true }
+    suspend fun setSaveRealNotifications(enabled: Boolean) = save(SettingsKeys.SAVE_REAL_NOTIFICATIONS, enabled.toString())
+    fun saveRealNotificationsSync(): Boolean = memoryCache[SettingsKeys.SAVE_REAL_NOTIFICATIONS]?.toBooleanStrictOrNull() ?: true
 }

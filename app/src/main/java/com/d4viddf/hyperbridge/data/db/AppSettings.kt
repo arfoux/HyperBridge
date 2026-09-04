@@ -34,4 +34,7 @@ object SettingsKeys {
     // Nav
     const val NAV_LEFT = "nav_left_content"
     const val NAV_RIGHT = "nav_right_content"
+
+    // Test
+    const val SAVE_REAL_NOTIFICATIONS = "save_real_notifications"
 }

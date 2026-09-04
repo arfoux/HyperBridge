@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.d4viddf.hyperbridge.R
+import com.d4viddf.hyperbridge.data.AppPreferences
 import com.d4viddf.hyperbridge.data.db.AppDatabase
 import com.d4viddf.hyperbridge.models.NotificationType
 import com.d4viddf.hyperbridge.util.TestNotificationHelper
@@ -58,7 +59,9 @@ fun TestIslandScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { AppDatabase.getDatabase(context) }
+    val prefs = remember { AppPreferences(context) }
     val saved by db.savedNotificationDao().getRecentFlow().collectAsState(initial = emptyList())
+    val saveRealEnabled by prefs.saveRealNotificationsFlow.collectAsState(initial = true)
     var showClearDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -147,12 +150,38 @@ fun TestIslandScreen(onBack: () -> Unit) {
             }
 
             item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Rekam notif REAL", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (saveRealEnabled) "Aktif — setiap REAL disimpan (50 terakhir)" else "Nonaktif — REAL tidak disimpan",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = saveRealEnabled,
+                            onCheckedChange = { enabled ->
+                                scope.launch { prefs.setSaveRealNotifications(enabled) }
+                                if (!enabled) scope.launch { db.savedNotificationDao().clearAll() }
+                            }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Notifikasi Tersimpan (REAL, 50 terakhir)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     TextButton(onClick = { showClearDialog = true }) { Text("Clear") }
                 }
                 Text(
-                    "Otomatis simpan setiap notif REAL yang masuk (bukan TEST). Bisa bedain log REAL vs TEST via isTest flag. Tap Save untuk export log.",
+                    "Otomatis simpan setiap notif REAL yang masuk (bukan TEST) jika toggle di atas aktif. Bisa bedain log REAL vs TEST via isTest flag. Tap Save untuk export log.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
