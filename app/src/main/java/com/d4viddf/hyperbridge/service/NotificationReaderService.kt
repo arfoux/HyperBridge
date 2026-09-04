@@ -629,13 +629,32 @@ class NotificationReaderService : NotificationListenerService() {
                 }
             }
 
-            if (shouldIgnore(it.packageName)) return
-            if (!isAppAllowed(it.packageName)) return
+            if (shouldIgnore(it.packageName)) {
+                Log.w(TAG, "IGNORE pkg=${it.packageName}")
+                return
+            }
+            // Shopee LIVE_ACTIVITY eligible bypass isAppAllowed jika user pernah aktifin shopee (atau auto-allow)
+            val isShopeeLive = it.packageName == "com.shopee.id" && it.notification.extras.containsKey("extra_live_activity_id")
+            if (!isAppAllowed(it.packageName)) {
+                if (isShopeeLive) {
+                    Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
+                    serviceScope.launch { preferences.toggleApp(it.packageName, true) }
+                } else {
+                    Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
+                    return
+                }
+            }
 
             processingJobs[it.key]?.cancel()
 
             val job = serviceScope.launch {
-                if (isJunkNotification(it)) return@launch
+                val isJunk = isJunkNotification(it)
+                // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
+                if (isJunk && !isShopeeLive) {
+                    Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
+                    return@launch
+                }
+                if (isJunk && isShopeeLive) Log.w(TAG, "BYPASS junk for Shopee LIVE ${it.key}")
                 processStandardNotification(it)
             }
             processingJobs[it.key] = job
@@ -659,9 +678,29 @@ class NotificationReaderService : NotificationListenerService() {
         try {
             val extras = sbn.notification.extras
 
-            // [LOGIC] 1. Resolve Info intelligently
+            // [LOGIC] 1. Resolve Info intelligently — fallback chain: extras > bigText/subText > RemoteViews
             var effectiveTitle = resolveTitle(sbn)
-            val effectiveText = resolveText(sbn.notification.extras)
+            var effectiveText = resolveText(sbn.notification.extras)
+            // Fallback RemoteViews jika title/text kosong (Shopee DecoratedCustomViewStyle)
+            if ((effectiveTitle.isEmpty() || effectiveText.isEmpty()) && sbn.notification.contentView != null) {
+                try {
+                    val (rvTitle, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(
+                        sbn.notification.contentView, sbn.notification.bigContentView
+                    )
+                    if (effectiveTitle.isEmpty() && !rvTitle.isNullOrEmpty()) effectiveTitle = rvTitle
+                    if (effectiveText.isEmpty() && !rvText.isNullOrEmpty()) effectiveText = rvText
+                    // jika hanya satu yang terisi, gunakan juga sebagai fallback silang
+                    if (effectiveTitle.isEmpty() && !rvText.isNullOrEmpty()) effectiveTitle = rvText
+                    if (effectiveText.isEmpty() && !rvTitle.isNullOrEmpty()) effectiveText = rvTitle
+                } catch (_: Exception) {}
+            }
+            // Fallback tambahan: bigText/subText/infoText
+            if (effectiveText.isEmpty()) {
+                val big = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+                val sub = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim()
+                val info = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim()
+                effectiveText = big?.takeIf { it.isNotEmpty() } ?: sub?.takeIf { it.isNotEmpty() } ?: info ?: ""
+            }
 
             // [LOGIC] 2. State Preservation
             val key = sbn.key
@@ -671,19 +710,29 @@ class NotificationReaderService : NotificationListenerService() {
                 if (previous != null && previous.title.isNotEmpty() && previous.title != sbn.packageName) {
                     effectiveTitle = previous.title
                 } else {
-                    effectiveTitle = getCachedAppLabel(sbn.packageName)
+                    val label = getCachedAppLabel(sbn.packageName)
+                    effectiveTitle = if (label.isNotEmpty()) label else extras.getString(Notification.EXTRA_TEMPLATE)?.substringAfterLast('.') ?: sbn.packageName
                 }
             }
 
-            // [LOGIC] 3. Hard Stop
+            // [LOGIC] 3. Hard Stop — tapi jangan block Shopee LIVE_ACTIVITY eligible (punya liveId)
             val hasProgress = hasProgressNotification(sbn, effectiveTitle, effectiveText)
-
-            if (effectiveTitle.isEmpty() && !hasProgress) return
+            val isShopeeLiveEligible = sbn.packageName == "com.shopee.id" && extras.containsKey("extra_live_activity_id")
+            if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible) {
+                Log.w(TAG, "HARD-STOP empty title for ${sbn.packageName} (not live)")
+                return
+            }
 
             val appBlockedTerms = preferences.getAppBlockedTermsSync(sbn.packageName)
             if (appBlockedTerms.isNotEmpty()) {
                 val content = "$effectiveTitle $effectiveText"
-                if (appBlockedTerms.any { term -> content.contains(term, ignoreCase = true) }) return
+                if (appBlockedTerms.any { term -> content.contains(term, ignoreCase = true) }) {
+                    // Eligible Shopee delivery tetap lolos dari blockedTerms generic (voucher/promo sudah di-filter di detect)
+                    if (!(isShopeeLiveEligible && appBlockedTerms.any { it.equals("shopee", true) })) {
+                        Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
+                        return
+                    }
+                }
             }
 
             // [LOGIC] 4. Theme & Rules Interception
@@ -697,11 +746,18 @@ class NotificationReaderService : NotificationListenerService() {
                 detectNotificationType(sbn)
             }
 
-            // --- LAYERED TRIGGERS LOGIC ---
+            // --- LAYERED TRIGGERS LOGIC — fallback: Shopee DELIVERY eligible auto-allow jika channel/LIVE_ACTIVITY ---
             val effectiveTypes = getEffectiveTypes(sbn.packageName)
             if (!effectiveTypes.contains(type.name)) {
-                Log.d(TAG, " ABORTING: Type $type disabled by user/theme for ${sbn.packageName}")
-                return
+                val isShopeeDeliveryBypass = sbn.packageName == "com.shopee.id" && type == NotificationType.DELIVERY &&
+                    (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
+                if (isShopeeDeliveryBypass) {
+                    Log.w(TAG, "BYPASS effectiveTypes for Shopee DELIVERY: $effectiveTypes -> force allow (auto-enable)")
+                    serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
+                } else {
+                    Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
+                    return
+                }
             }
 
             var effectiveKey = key
@@ -972,6 +1028,14 @@ class NotificationReaderService : NotificationListenerService() {
         if ((title.isEmpty() || title.equals(pkg, ignoreCase = true)) && !bigTitle.isNullOrEmpty()) {
             return bigTitle
         }
+        if (!title.isNullOrEmpty() && !title.equals(pkg, ignoreCase = true)) return title
+        // Fallback: RemoteViews eligible (Shopee custom)
+        if (title.isEmpty() || title.equals(pkg, ignoreCase = true)) {
+            try {
+                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                if (!rvTitle.isNullOrEmpty()) return rvTitle
+            } catch (_: Exception) {}
+        }
         if (title.equals(pkg, ignoreCase = true)) return ""
         return title
     }
@@ -979,9 +1043,14 @@ class NotificationReaderService : NotificationListenerService() {
     private fun resolveText(extras: Bundle): String {
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim()
+        val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim()
 
         if (!text.isNullOrEmpty()) return text
-        return bigText ?: ""
+        if (!bigText.isNullOrEmpty()) return bigText
+        if (!subText.isNullOrEmpty()) return subText
+        if (!infoText.isNullOrEmpty()) return infoText
+        return ""
     }
 
     private suspend fun ensureValidSbn(sbn: StatusBarNotification): StatusBarNotification {
@@ -1010,6 +1079,7 @@ class NotificationReaderService : NotificationListenerService() {
         val n = sbn.notification
         val extras = n.extras
         val template = extras.getString(Notification.EXTRA_TEMPLATE) ?: ""
+        val channelId = n.channelId ?: ""
         val isCall = n.category == Notification.CATEGORY_CALL || template == "android.app.Notification\$CallStyle"
         val isNav = n.category == Notification.CATEGORY_NAVIGATION || sbn.packageName.let { it.contains("maps") || it.contains("waze") }
         val isTimer = (extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) || n.category == Notification.CATEGORY_ALARM) && n.`when` > 0
@@ -1024,19 +1094,55 @@ class NotificationReaderService : NotificationListenerService() {
         val isProgressStyle = template == "android.app.Notification\$ProgressStyle"
         val isLiveActivity = extras.containsKey("extra_live_activity_id")
 
+        // --- SHOPEE ELIGIBLE CHECK (fallback chain: ambil semua data) ---
+        // Primary: SHOPEE_LIVE_ACTIVITY_ID + liveId (observed: "Driver sedang menuju Resto" / shopee_food_orders_*)
+        // Fallback 1: SHOPEE_FOOD_ID channel (exists but currently unused) + food keywords, bukan promo
+        // Fallback 2: any SHOPEE channel + customView + food keywords (jika Shopee ganti implementasi)
+        val isShopee = sbn.packageName == "com.shopee.id"
+        val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        val rawText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val rawBig = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+        val rawSub = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
+        // RemoteViews fallback: jika extras kosong, coba parse custom view
+        val rvTexts = if (rawTitle.isBlank() && rawText.isBlank()) {
+            try {
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.contentView) +
+                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.bigContentView)
+            } catch (_: Exception) { emptyList() }
+        } else emptyList()
+        val combined = buildString {
+            append(rawTitle); append(' '); append(rawText); append(' '); append(rawBig); append(' '); append(rawSub)
+            if (rvTexts.isNotEmpty()) { append(' '); append(rvTexts.joinToString(" ")) }
+        }.lowercase()
+        val hasFoodKeyword = combined.contains("driver") || combined.contains("resto") || combined.contains("pesanan") ||
+            combined.contains("makanan") || combined.contains("momoyo") || combined.contains("sedang menuju") ||
+            combined.contains("sedang disiapkan") || combined.contains("diantar") || combined.contains("mencari driver")
+        val isPromo = combined.contains("voucher") || combined.contains("diskon") || combined.contains("promo") ||
+            combined.contains("gratis") && combined.contains("ongkir") || combined.contains("9.9") || combined.contains("serba rp")
+        val hasCustomView = extras.getBoolean("android.contains.customView", false)
+        val isShopeeFoodEligible = isShopee && (
+            (isLiveActivity && channelId.contains("LIVE_ACTIVITY", ignoreCase = true)) ||
+                channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo ||
+                (hasCustomView && channelId.contains("SHOPEE", ignoreCase = true) && hasFoodKeyword && !isPromo)
+            )
+        val isShopeeFoodFallback = isShopee && channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo
+
         val title = resolveTitle(sbn)
         val text = resolveText(extras)
         val isDownload = isDownloadNotification(sbn, title, text)
         val hasProgress = hasProgressNotification(sbn, title, text)
 
-        // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device
-        if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity) {
-            Log.d(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} cat=${n.category} tpl=$template title='$title' text='$text' progress=$hasProgress live=$isLiveActivity")
+        // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device (Log.w biar tidak di-strip proguard)
+        if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity || isShopeeFoodEligible) {
+            Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)}")
         }
 
         return when {
             isCall -> NotificationType.CALL
             isNav -> NotificationType.NAVIGATION
+            // ShopeFood delivery harus diutamakan sebelum MESSAGE agar tidak salah jadi chat
+            isShopeeFoodEligible -> NotificationType.DELIVERY
+            isShopeeFoodFallback -> NotificationType.DELIVERY
             isMessage -> NotificationType.MESSAGE
             isProgressStyle -> NotificationType.DELIVERY
             isLiveActivity -> NotificationType.DELIVERY
@@ -1232,6 +1338,17 @@ class NotificationReaderService : NotificationListenerService() {
         val extras = notification.extras
         val pkg = sbn.packageName
 
+        // ShopeFood LIVE eligible tidak pernah junk — ambil semua data eligible
+        if (pkg == "com.shopee.id" && extras.containsKey("extra_live_activity_id")) return false
+        // ShopeeFood via RemoteViews juga eligible (fallback jika tanpa liveId tapi customView + food keyword)
+        if (pkg == "com.shopee.id" && extras.getBoolean("android.contains.customView", false)) {
+            val ch = notification.channelId ?: ""
+            if (ch.contains("SHOPEE", ignoreCase = true)) {
+                // cek promo vs food via RemoteViews fallback sudah di detect, tapi di sini jangan block
+                return false
+            }
+        }
+
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
 
@@ -1239,7 +1356,14 @@ class NotificationReaderService : NotificationListenerService() {
         val isSpecial = notification.category == Notification.CATEGORY_TRANSPORT || notification.category == Notification.CATEGORY_CALL ||
                 notification.category == Notification.CATEGORY_NAVIGATION || extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true
         if (hasProgress || isSpecial) return false
-        if (title.isEmpty() && text.isEmpty()) return true
+        if (title.isEmpty() && text.isEmpty()) {
+            // Cek RemoteViews eligible sebelum dianggap junk
+            try {
+                val rv = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(notification.contentView)
+                if (rv.isNotEmpty()) return false
+            } catch (_: Exception) {}
+            return true
+        }
         if (title.equals(pkg, ignoreCase = true) || text.equals(pkg, ignoreCase = true)) return true
         if (globalBlockedTerms.any { "$title $text".contains(it, true) }) return true
 

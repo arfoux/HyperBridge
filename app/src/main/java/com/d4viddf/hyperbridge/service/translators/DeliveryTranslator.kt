@@ -29,27 +29,63 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 1. Resolve Theme Colors
         val themeColor = resolveColor(theme, sbn.packageName, "#EE4D2D") // Shopee orange-ish default
 
-        // 2. Parse Notification Content
+        // 2. Parse Notification Content — fallback chain: ambil semua data eligible
         val extras = sbn.notification.extras
 
-        // [DEBUG] Dump raw payload so we can refine the mapping without guessing
-        android.util.Log.d(
+        // [DEBUG] Dump raw payload so we can refine the mapping without guessing (Log.w biar kebaca di release)
+        android.util.Log.w(
             "HyperBridgeDebug",
-            "DELIVERY-PAYLOAD pkg=${sbn.packageName} " +
+            "DELIVERY-PAYLOAD pkg=${sbn.packageName} ch=${sbn.notification.channelId} " +
                 "title='${extras.getCharSequence(Notification.EXTRA_TITLE)}' " +
                 "text='${extras.getCharSequence(Notification.EXTRA_TEXT)}' " +
                 "big='${extras.getCharSequence(Notification.EXTRA_BIG_TEXT)}' " +
                 "sub='${extras.getCharSequence(Notification.EXTRA_SUB_TEXT)}' " +
+                "info='${extras.getCharSequence(Notification.EXTRA_INFO_TEXT)}' " +
                 "progress=${extras.getInt(Notification.EXTRA_PROGRESS, 0)}/" +
                 "${extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)} " +
-                "tpl='${extras.getString(Notification.EXTRA_TEMPLATE)}'"
+                "live='${extras.getString("extra_live_activity_id")}' " +
+                "tpl='${extras.getString(Notification.EXTRA_TEMPLATE)}' custom=${extras.getBoolean("android.contains.customView")}"
         )
-        val title = effectiveTitle.ifEmpty {
-            extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim()
-                ?: context.getString(R.string.type_delivery)
+        // Fallback eligible: title -> bigTitle -> RemoteViews -> appLabel -> type_delivery
+        var title = effectiveTitle.ifEmpty {
+            extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim() ?: ""
         }
-        val text = effectiveText.ifEmpty {
+        if (title.isEmpty()) {
+            title = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()?.replace("\n", " ")?.trim() ?: ""
+        }
+        if (title.isEmpty()) {
+            try {
+                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                if (!rvTitle.isNullOrEmpty()) title = rvTitle
+            } catch (_: Exception) {}
+        }
+        if (title.isEmpty()) {
+            title = context.getString(R.string.type_delivery)
+        }
+        var text = effectiveText.ifEmpty {
             extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
+        }
+        if (text.isEmpty()) {
+            text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
+        }
+        if (text.isEmpty()) {
+            text = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
+        }
+        if (text.isEmpty()) {
+            text = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
+        }
+        if (text.isEmpty()) {
+            try {
+                val (_, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                if (!rvText.isNullOrEmpty()) text = rvText
+                // jika masih kosong, ambil semua texts dari RemoteViews gabung
+                if (text.isEmpty()) {
+                    val all = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView) +
+                        com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView)
+                    val distinct = all.distinct().filterNot { it == title }
+                    if (distinct.isNotEmpty()) text = distinct.joinToString(" • ").take(180)
+                }
+            } catch (_: Exception) {}
         }
 
         val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
