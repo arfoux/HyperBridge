@@ -8,11 +8,15 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.graphics.drawable.IconCompat
 import com.d4viddf.hyperbridge.MainActivity
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.models.NotificationType
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Helper untuk Test Pill semua kategori.
@@ -109,7 +113,7 @@ object TestNotificationHelper {
             val json = builder.buildJsonParam()
 
             // Post via HyperBridge channel with miui.focus.param — ini yang trigger pill di HyperOS
-            val nm = NotificationManager.from(context)
+            val nm = NotificationManagerCompat.from(context)
             val notifBuilder = NotificationCompat.Builder(context, TEST_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(title)
@@ -147,7 +151,7 @@ object TestNotificationHelper {
 
     private fun fallbackPostTest(context: Context, type: NotificationType) {
         ensureTestChannel(context)
-        val nm = NotificationManager.from(context)
+        val nm = NotificationManagerCompat.from(context)
         val id = TEST_BASE_ID + type.ordinal
         val builder = NotificationCompat.Builder(context, TEST_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
@@ -193,12 +197,12 @@ object TestNotificationHelper {
     }
 
     fun cancelTest(context: Context, type: NotificationType) {
-        NotificationManager.from(context).cancel(TEST_BASE_ID + type.ordinal)
+        NotificationManagerCompat.from(context).cancel(TEST_BASE_ID + type.ordinal)
         android.util.Log.w("HyperBridgeTest", "CANCELED TEST type=${type.name}")
     }
 
     fun cancelAllTests(context: Context) {
-        val nm = NotificationManager.from(context)
+        val nm = NotificationManagerCompat.from(context)
         NotificationType.entries.forEach { nm.cancel(TEST_BASE_ID + it.ordinal) }
         android.util.Log.w("HyperBridgeTest", "CANCELED ALL TESTS")
     }
