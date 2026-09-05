@@ -222,7 +222,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 textInfo = TextInfo(eta, "")
             )
         )
-        builder.setSmallIsland(logoKey)
+        builder.setSmallIsland(coverKey)
         builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
         builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
 
