@@ -109,6 +109,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 sbn.notification.headsUpContentView
             )
         } catch (_: Exception) { null }
+        android.util.Log.w(
+            "HyperBridgeDebug",
+            "DELIVERY-BANNER pkg=${sbn.packageName} " +
+                (if (banner != null) "found=${banner.width}x${banner.height}" else "null->logo")
+        )
         builder.addPicture(if (banner != null) HyperPicture(picKey, banner) else resolveIcon(sbn, picKey))
         builder.addPicture(getTransparentPicture("hidden_pixel"))
 
