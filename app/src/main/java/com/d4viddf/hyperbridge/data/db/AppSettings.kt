@@ -37,4 +37,7 @@ object SettingsKeys {
 
     // Test
     const val SAVE_REAL_NOTIFICATIONS = "save_real_notifications"
+
+    // Debug
+    const val DEBUG_LOGGING = "debug_logging"
 }

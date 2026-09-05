@@ -4,6 +4,7 @@ import android.app.Notification
 import android.content.Context
 import android.service.notification.StatusBarNotification
 import com.d4viddf.hyperbridge.R
+import com.d4viddf.hyperbridge.data.AppPreferences
 import com.d4viddf.hyperbridge.data.theme.ThemeRepository
 import com.d4viddf.hyperbridge.models.HyperIslandData
 import com.d4viddf.hyperbridge.models.IslandConfig
@@ -16,6 +17,7 @@ import io.github.d4viddf.hyperisland_kit.models.PicInfo
 import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
+    private val preferences = AppPreferences(context)
 
     fun translate(
         sbn: StatusBarNotification,
@@ -33,7 +35,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val extras = sbn.notification.extras
 
         // [DEBUG] Dump raw payload so we can refine the mapping without guessing (Log.w biar kebaca di release)
-        android.util.Log.w(
+        if (preferences.debugLoggingSync()) android.util.Log.w(
             "HyperBridgeDebug",
             "DELIVERY-PAYLOAD pkg=${sbn.packageName} ch=${sbn.notification.channelId} " +
                 "title='${extras.getCharSequence(Notification.EXTRA_TITLE)}' " +
@@ -56,7 +58,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
         if (title.isEmpty()) {
             try {
-                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, preferences.debugLoggingSync())
                 if (!rvTitle.isNullOrEmpty()) title = rvTitle
             } catch (_: Exception) {}
         }
@@ -77,12 +79,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
         if (text.isEmpty()) {
             try {
-                val (_, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                val (_, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, preferences.debugLoggingSync())
                 if (!rvText.isNullOrEmpty()) text = rvText
                 // jika masih kosong, ambil semua texts dari RemoteViews gabung
                 if (text.isEmpty()) {
-                    val all = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView) +
-                        com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView)
+                    val all = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView, preferences.debugLoggingSync()) +
+                        com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView, preferences.debugLoggingSync())
                     val distinct = all.distinct().filterNot { it == title }
                     if (distinct.isNotEmpty()) text = distinct.joinToString(" • ").take(180)
                 }
@@ -109,7 +111,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 sbn.notification.headsUpContentView
             )
         } catch (_: Exception) { null }
-        android.util.Log.w(
+        if (preferences.debugLoggingSync()) android.util.Log.w(
             "HyperBridgeDebug",
             "DELIVERY-BANNER pkg=${sbn.packageName} " +
                 (if (banner != null) "found=${banner.width}x${banner.height}" else "null->logo")

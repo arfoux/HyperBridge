@@ -64,6 +64,8 @@ class NotificationReaderService : NotificationListenerService() {
 
     private val TAG = "HyperBridgeDebug"
     private val EXTRA_ORIGINAL_KEY = "hyper_original_key"
+    private fun debugLogEnabled(): Boolean =
+        if (::preferences.isInitialized) preferences.debugLoggingSync() else true
 
     // --- CHANNELS ---
     private val NOTIFICATION_CHANNEL_ID = "hyper_bridge_notification_channel"
@@ -222,7 +224,7 @@ class NotificationReaderService : NotificationListenerService() {
         // Listen for Theme Changes
         serviceScope.launch {
             preferences.activeThemeIdFlow.collectLatest { themeId ->
-                Log.d(TAG, "Service detected theme change: $themeId")
+                if (debugLogEnabled()) Log.d(TAG, "Service detected theme change: $themeId")
                 if (themeId != null) {
                     themeRepository.activateTheme(themeId)
                 } else {
@@ -263,7 +265,7 @@ class NotificationReaderService : NotificationListenerService() {
             serviceScope.launch {
                 val themeId = preferences.activeThemeIdFlow.first()
                 if (themeId != null) {
-                    Log.d(TAG, "Hot-reloading theme: $themeId")
+                    if (debugLogEnabled()) Log.d(TAG, "Hot-reloading theme: $themeId")
                     themeRepository.activateTheme(themeId)
                 }
             }
@@ -426,12 +428,12 @@ class NotificationReaderService : NotificationListenerService() {
                 }
 
                 if (originalKey != null) {
-                    Log.d(TAG, "Our notification $notifId removed. Cleaning up cache for $originalKey")
+                    if (debugLogEnabled()) Log.d(TAG, "Our notification $notifId removed. Cleaning up cache for $originalKey")
                     // [FIX] We no longer kill the source notification when our Island is dismissed or timed out
                     try {
                         activeIslands[originalKey]?.deleteIntent?.send()
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error sending delete intent for original notification", e)
+                        if (debugLogEnabled()) Log.e(TAG, "Error sending delete intent for original notification", e)
                     }
                     cleanupCache(originalKey)
                 }
@@ -501,7 +503,7 @@ class NotificationReaderService : NotificationListenerService() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error during smart dismissal", e)
+            if (debugLogEnabled()) Log.e(TAG, "Error during smart dismissal", e)
         }
     }
 
@@ -537,7 +539,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (timeoutSeconds > 0) {
                 timeoutJobs[originalKey] = serviceScope.launch {
                     delay((timeoutSeconds * 1000L).milliseconds)
-                    Log.d(TAG, "Timeout reached for $originalKey, removing translated notification $bridgeId")
+                    if (debugLogEnabled()) Log.d(TAG, "Timeout reached for $originalKey, removing translated notification $bridgeId")
                     NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
                     cleanupCache(originalKey)
                     timeoutJobs.remove(originalKey)
@@ -549,7 +551,7 @@ class NotificationReaderService : NotificationListenerService() {
             timeoutJobs[originalKey]?.cancel()
             timeoutJobs[originalKey] = serviceScope.launch {
                 delay(STANDARD_ISLAND_TIMEOUT_MS)
-                Log.d(TAG, "Island TTL reached for $originalKey, removing translated notification $bridgeId")
+                if (debugLogEnabled()) Log.d(TAG, "Island TTL reached for $originalKey, removing translated notification $bridgeId")
                 NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
                 cleanupCache(originalKey)
                 timeoutJobs.remove(originalKey)
@@ -571,7 +573,7 @@ class NotificationReaderService : NotificationListenerService() {
                 .build()
             NotificationManagerCompat.from(this).notify(relayId, notification)
         } catch (e: Exception) {
-            Log.e(TAG, "Error posting watch relay notification", e)
+            if (debugLogEnabled()) Log.e(TAG, "Error posting watch relay notification", e)
         }
     }
 
@@ -579,7 +581,7 @@ class NotificationReaderService : NotificationListenerService() {
         val orientation = if (isLandscape) "Landscape" else "Portrait"
         val isIslandExhibited = activeIslands.isNotEmpty() || activeWidgets.isNotEmpty() || nativeIslands.isNotEmpty() || permanentIslandManager.isIslandActive()
         val islandState = if (isIslandExhibited) "Showing Island" else "No Island"
-        Log.d(TAG, "State: $orientation | $islandState")
+        if (debugLogEnabled()) Log.d(TAG, "State: $orientation | $islandState")
     }
 
     private fun updatePermanentIsland() {
@@ -630,17 +632,17 @@ class NotificationReaderService : NotificationListenerService() {
             }
 
             if (shouldIgnore(it.packageName)) {
-                Log.w(TAG, "IGNORE pkg=${it.packageName}")
+                if (debugLogEnabled()) Log.w(TAG, "IGNORE pkg=${it.packageName}")
                 return
             }
             // Shopee LIVE_ACTIVITY eligible bypass isAppAllowed jika user pernah aktifin shopee (atau auto-allow)
             val isShopeeLive = it.packageName == "com.shopee.id" && it.notification.extras.containsKey("extra_live_activity_id")
             if (!isAppAllowed(it.packageName)) {
                 if (isShopeeLive) {
-                    Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
+                    if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
                     serviceScope.launch { preferences.toggleApp(it.packageName, true) }
                 } else {
-                    Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
+                    if (debugLogEnabled()) Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
                     return
                 }
             }
@@ -651,10 +653,10 @@ class NotificationReaderService : NotificationListenerService() {
                 val isJunk = isJunkNotification(it)
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
                 if (isJunk && !isShopeeLive) {
-                    Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
+                    if (debugLogEnabled()) Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
                     return@launch
                 }
-                if (isJunk && isShopeeLive) Log.w(TAG, "BYPASS junk for Shopee LIVE ${it.key}")
+                if (isJunk && isShopeeLive) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for Shopee LIVE ${it.key}")
                 processStandardNotification(it)
             }
             processingJobs[it.key] = job
@@ -669,7 +671,7 @@ class NotificationReaderService : NotificationListenerService() {
         val dndActive = isDndModeEnabled || (autoDetectDnd && isSystemDndActive)
 
         if (dndActive) {
-            Log.d(TAG, "DND active. Skipping notification ${rawSbn.packageName}")
+            if (debugLogEnabled()) Log.d(TAG, "DND active. Skipping notification ${rawSbn.packageName}")
             return
         }
 
@@ -685,7 +687,7 @@ class NotificationReaderService : NotificationListenerService() {
             if ((effectiveTitle.isEmpty() || effectiveText.isEmpty()) && sbn.notification.contentView != null) {
                 try {
                     val (rvTitle, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(
-                        sbn.notification.contentView, sbn.notification.bigContentView
+                        sbn.notification.contentView, sbn.notification.bigContentView, debugLogEnabled()
                     )
                     if (effectiveTitle.isEmpty() && !rvTitle.isNullOrEmpty()) effectiveTitle = rvTitle
                     if (effectiveText.isEmpty() && !rvText.isNullOrEmpty()) effectiveText = rvText
@@ -719,7 +721,7 @@ class NotificationReaderService : NotificationListenerService() {
             val hasProgress = hasProgressNotification(sbn, effectiveTitle, effectiveText)
             val isShopeeLiveEligible = sbn.packageName == "com.shopee.id" && extras.containsKey("extra_live_activity_id")
             if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible) {
-                Log.w(TAG, "HARD-STOP empty title for ${sbn.packageName} (not live)")
+                if (debugLogEnabled()) Log.w(TAG, "HARD-STOP empty title for ${sbn.packageName} (not live)")
                 return
             }
 
@@ -729,7 +731,7 @@ class NotificationReaderService : NotificationListenerService() {
                 if (appBlockedTerms.any { term -> content.contains(term, ignoreCase = true) }) {
                     // Eligible Shopee delivery tetap lolos dari blockedTerms generic (voucher/promo sudah di-filter di detect)
                     if (!(isShopeeLiveEligible && appBlockedTerms.any { it.equals("shopee", true) })) {
-                        Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
+                        if (debugLogEnabled()) Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
                         return
                     }
                 }
@@ -751,7 +753,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (isTestNotif) {
                 Log.w("HyperBridgeTest", "TEST pkg=${sbn.packageName} type=$type title='$effectiveTitle' text='$effectiveText' ch=${sbn.notification.channelId} tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
             } else {
-                Log.w("HyperBridgeDebug", "REAL pkg=${sbn.packageName} ch=${sbn.notification.channelId} type=$type title='$effectiveTitle' text='$effectiveText' tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
+                if (debugLogEnabled()) Log.w("HyperBridgeDebug", "REAL pkg=${sbn.packageName} ch=${sbn.notification.channelId} type=$type title='$effectiveTitle' text='$effectiveText' tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
             }
             // Simpan ke history (50 terakhir, bedain isTest) — hormati toggle nonaktifin rekam REAL
             val shouldSave = isTestNotif || preferences.saveRealNotificationsSync()
@@ -778,10 +780,10 @@ class NotificationReaderService : NotificationListenerService() {
                             val cutoff = all.last().postTime
                             db.savedNotificationDao().pruneBefore(cutoff)
                         }
-                    } catch (e: Exception) { Log.e("HyperBridgeDebug", "save history failed", e) }
+                    } catch (e: Exception) { if (debugLogEnabled()) Log.e("HyperBridgeDebug", "save history failed", e) }
                 }
             } else {
-                Log.w("HyperBridgeDebug", "SKIP save REAL (toggle off) pkg=${sbn.packageName} type=$type")
+                if (debugLogEnabled()) Log.w("HyperBridgeDebug", "SKIP save REAL (toggle off) pkg=${sbn.packageName} type=$type")
             }
 
             // --- LAYERED TRIGGERS LOGIC — fallback: Shopee DELIVERY eligible auto-allow jika channel/LIVE_ACTIVITY ---
@@ -790,10 +792,10 @@ class NotificationReaderService : NotificationListenerService() {
                 val isShopeeDeliveryBypass = sbn.packageName == "com.shopee.id" && type == NotificationType.DELIVERY &&
                     (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
                 if (isShopeeDeliveryBypass) {
-                    Log.w(TAG, "BYPASS effectiveTypes for Shopee DELIVERY: $effectiveTypes -> force allow (auto-enable)")
+                    if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for Shopee DELIVERY: $effectiveTypes -> force allow (auto-enable)")
                     serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
                 } else {
-                    Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
+                    if (debugLogEnabled()) Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
                     return
                 }
             }
@@ -873,7 +875,7 @@ class NotificationReaderService : NotificationListenerService() {
             val useLiveUpdates = getEffectiveEngine(sbn.packageName)
 
             if (useLiveUpdates) {
-                Log.i(TAG, " POSTING Native Live Update -> ID: $bridgeId, Type: $type")
+                if (debugLogEnabled()) Log.i(TAG, " POSTING Native Live Update -> ID: $bridgeId, Type: $type")
 
                 // [FIX] Fetch the user's custom layout so the Live Update can use it!
                 val navLayout = if (type == NotificationType.NAVIGATION) getEffectiveNav(sbn.packageName) else null
@@ -967,13 +969,13 @@ class NotificationReaderService : NotificationListenerService() {
 
             val removedTime = recentlyRemovedKeys[rawSbn.key]
             if (removedTime != null && System.currentTimeMillis() - removedTime < 2000) {
-                Log.d(TAG, "Skipping post because notification was recently removed: ${rawSbn.key}")
+                if (debugLogEnabled()) Log.d(TAG, "Skipping post because notification was recently removed: ${rawSbn.key}")
                 return
             }
 
             val shouldAlertOnce = isUpdate && (type == NotificationType.PROGRESS || type == NotificationType.DOWNLOAD || type == NotificationType.MEDIA)
 
-            Log.i(TAG, " POSTING Island -> ID: $bridgeId, Type: $type, FinalTitle: '$effectiveTitle', FinalText: '$effectiveText'")
+            if (debugLogEnabled()) Log.i(TAG, " POSTING Island -> ID: $bridgeId, Type: $type, FinalTitle: '$effectiveTitle', FinalText: '$effectiveText'")
             postStandardNotification(sbn, bridgeId, data, shouldAlertOnce)
 
             activeIslands[effectiveKey] = ActiveIsland(
@@ -986,7 +988,7 @@ class NotificationReaderService : NotificationListenerService() {
             handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, false, sbn, effectiveTitle, effectiveText)
 
         } catch (e: Exception) {
-            Log.e(TAG, "💥 Error processing standard notification", e)
+            if (debugLogEnabled()) Log.e(TAG, "💥 Error processing standard notification", e)
         }
     }
 
@@ -1029,7 +1031,7 @@ class NotificationReaderService : NotificationListenerService() {
             }
         }
 
-        Log.d(TAG, "🔍 isDownloadNotification check: pkg=$pkg, channelId='$channelId', title='$title', text='$text', resolved=$isMatch")
+        if (debugLogEnabled()) Log.d(TAG, "🔍 isDownloadNotification check: pkg=$pkg, channelId='$channelId', title='$title', text='$text', resolved=$isMatch")
         return isMatch
     }
 
@@ -1070,7 +1072,7 @@ class NotificationReaderService : NotificationListenerService() {
         // Fallback: RemoteViews eligible (Shopee custom)
         if (title.isEmpty() || title.equals(pkg, ignoreCase = true)) {
             try {
-                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView)
+                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, debugLogEnabled())
                 if (!rvTitle.isNullOrEmpty()) return rvTitle
             } catch (_: Exception) {}
         }
@@ -1144,8 +1146,8 @@ class NotificationReaderService : NotificationListenerService() {
         // RemoteViews fallback: jika extras kosong, coba parse custom view
         val rvTexts = if (rawTitle.isBlank() && rawText.isBlank()) {
             try {
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.contentView) +
-                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.bigContentView)
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.contentView, debugLogEnabled()) +
+                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.bigContentView, debugLogEnabled())
             } catch (_: Exception) { emptyList() }
         } else emptyList()
         val combined = buildString {
@@ -1172,7 +1174,7 @@ class NotificationReaderService : NotificationListenerService() {
 
         // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device (Log.w biar tidak di-strip proguard)
         if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity || isShopeeFoodEligible) {
-            Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)} keys=${extras.keySet().joinToString()}")
+            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)} keys=${extras.keySet().joinToString()}")
         }
 
         return when {
@@ -1306,7 +1308,7 @@ class NotificationReaderService : NotificationListenerService() {
             postWidgetNotification(WIDGET_ID_BASE + widgetId, data)
             activeWidgets.add(widgetId)
             updatePermanentIsland()
-        } catch (e: Exception) { Log.e(TAG, "Failed widget $widgetId", e) }
+        } catch (e: Exception) { if (debugLogEnabled()) Log.e(TAG, "Failed widget $widgetId", e) }
     }
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -1397,7 +1399,7 @@ class NotificationReaderService : NotificationListenerService() {
         if (title.isEmpty() && text.isEmpty()) {
             // Cek RemoteViews eligible sebelum dianggap junk
             try {
-                val rv = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(notification.contentView)
+                val rv = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(notification.contentView, debugLogEnabled())
                 if (rv.isNotEmpty()) return false
             } catch (_: Exception) {}
             return true
@@ -1440,7 +1442,7 @@ class NotificationReaderService : NotificationListenerService() {
     private var syncJob: Job? = null
 
     override fun onListenerConnected() { 
-        Log.i(TAG, "HyperBridge Service Connected")
+        if (debugLogEnabled()) Log.i(TAG, "HyperBridge Service Connected")
         syncNotifications(refresh = true)
         syncJob?.cancel()
         syncJob = serviceScope.launch {
@@ -1519,7 +1521,7 @@ class NotificationReaderService : NotificationListenerService() {
                 }
 
                 for (key in keysToRemove) {
-                    Log.d(TAG, "Sync: Found stuck notification $key, removing.")
+                    if (debugLogEnabled()) Log.d(TAG, "Sync: Found stuck notification $key, removing.")
                     val hyperId = activeTranslations[key]
                     if (hyperId != null) {
                         try {
@@ -1556,7 +1558,7 @@ class NotificationReaderService : NotificationListenerService() {
                     if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) continue
                     if (reverseTranslations.containsKey(id)) continue
                     if (System.currentTimeMillis() - sbn.postTime < 5000) continue
-                    Log.d(TAG, "Sync: Reaping orphan bridge notification $id")
+                    if (debugLogEnabled()) Log.d(TAG, "Sync: Reaping orphan bridge notification $id")
                     try {
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(id)
                     } catch (_: Exception) {}
@@ -1572,7 +1574,7 @@ class NotificationReaderService : NotificationListenerService() {
                     refresh
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Error syncing notifications", e)
+                if (debugLogEnabled()) Log.e(TAG, "Error syncing notifications", e)
             }
         }
     }

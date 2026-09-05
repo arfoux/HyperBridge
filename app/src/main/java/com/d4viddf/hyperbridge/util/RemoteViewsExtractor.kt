@@ -27,7 +27,7 @@ object RemoteViewsExtractor {
     /** Banner dianggap persegi panjang (landscape) bila w/h melebihi rasio ini. */
     private const val WIDE_ASPECT = 1.2f
 
-    fun extractTexts(remoteViews: RemoteViews?): List<String> {
+    fun extractTexts(remoteViews: RemoteViews?, debugLogging: Boolean = true): List<String> {
         if (remoteViews == null) return emptyList()
         return try {
             val field = RemoteViews::class.java.getDeclaredField("mActions")
@@ -63,15 +63,15 @@ object RemoteViewsExtractor {
             // dedupe preserving order, filter promo noise? keep all eligible
             out.distinct().filter { it.length in 2..200 }
         } catch (e: Exception) {
-            Log.w(TAG, "extract failed", e)
+            if (debugLogging) Log.w(TAG, "extract failed", e)
             emptyList()
         }
     }
 
-    fun extractBestTitleText(remoteViews: RemoteViews?, bigRemoteViews: RemoteViews?): Pair<String?, String?> {
+    fun extractBestTitleText(remoteViews: RemoteViews?, bigRemoteViews: RemoteViews?, debugLogging: Boolean = true): Pair<String?, String?> {
         val all = mutableListOf<String>()
-        all.addAll(extractTexts(remoteViews))
-        all.addAll(extractTexts(bigRemoteViews))
+        all.addAll(extractTexts(remoteViews, debugLogging))
+        all.addAll(extractTexts(bigRemoteViews, debugLogging))
         if (all.isEmpty()) return null to null
         // Shopee custom view biasanya: [0]=title, [1]=content, [2]=extra
         // Fallback: ambil 2 string terpanjang / paling relevan yang tidak mengandung promo generic

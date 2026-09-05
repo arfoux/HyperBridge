@@ -606,4 +606,9 @@ class AppPreferences(context: Context) {
     val saveRealNotificationsFlow: Flow<Boolean> = dao.getSettingFlow(SettingsKeys.SAVE_REAL_NOTIFICATIONS).map { it?.toBooleanStrictOrNull() ?: true }
     suspend fun setSaveRealNotifications(enabled: Boolean) = save(SettingsKeys.SAVE_REAL_NOTIFICATIONS, enabled.toString())
     fun saveRealNotificationsSync(): Boolean = memoryCache[SettingsKeys.SAVE_REAL_NOTIFICATIONS]?.toBooleanStrictOrNull() ?: true
+
+    // --- DEBUG: Logcat toggle (default true = perilaku sekarang) ---
+    val debugLoggingFlow: Flow<Boolean> = dao.getSettingFlow(SettingsKeys.DEBUG_LOGGING).map { it?.toBooleanStrictOrNull() ?: true }
+    suspend fun setDebugLogging(enabled: Boolean) = save(SettingsKeys.DEBUG_LOGGING, enabled.toString())
+    fun debugLoggingSync(): Boolean = memoryCache[SettingsKeys.DEBUG_LOGGING]?.toBooleanStrictOrNull() ?: true
 }

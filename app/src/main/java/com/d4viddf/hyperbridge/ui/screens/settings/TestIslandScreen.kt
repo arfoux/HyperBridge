@@ -62,6 +62,7 @@ fun TestIslandScreen(onBack: () -> Unit) {
     val prefs = remember { AppPreferences(context) }
     val saved by db.savedNotificationDao().getRecentFlow().collectAsState(initial = emptyList())
     val saveRealEnabled by prefs.saveRealNotificationsFlow.collectAsState(initial = true)
+    val debugLoggingEnabled by prefs.debugLoggingFlow.collectAsState(initial = true)
     var showClearDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -171,6 +172,30 @@ fun TestIslandScreen(onBack: () -> Unit) {
                             onCheckedChange = { enabled ->
                                 scope.launch { prefs.setSaveRealNotifications(enabled) }
                                 if (!enabled) scope.launch { db.savedNotificationDao().clearAll() }
+                            }
+                        )
+                    }
+                }
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Log debug", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (debugLoggingEnabled) "Aktif — log teknis (logcat) ditulis" else "Nonaktif — log teknis dimatikan",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = debugLoggingEnabled,
+                            onCheckedChange = { enabled ->
+                                scope.launch { prefs.setDebugLogging(enabled) }
                             }
                         )
                     }
