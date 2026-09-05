@@ -120,12 +120,18 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             ?: etaRegex.find(text)?.value
             ?: etaRegex.find(title)?.value
             ?: text.ifEmpty { title }
-        // Stage driver-resto-tujuan dari keyword status (tahap tertinggi menang)
+        // Stage driver-resto-tujuan dari keyword status (tahap tertinggi menang).
+        // Hati-hati: "tiba pada HH:MM" = ESTIMASI (bukan tiba beneran), "hampir tiba" = masih jalan.
         val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" ")).lowercase()
+        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}:\\d{2}").containsMatchIn(stageCorpus)
         val stage = when {
-            stageCorpus.contains("tiba") || stageCorpus.contains("selesai") -> 3
-            stageCorpus.contains("menuju") || stageCorpus.contains("diantar") -> 2
-            stageCorpus.contains("disiapkan") -> 1
+            stageCorpus.contains("selamat menikmati") || stageCorpus.contains("sudah tiba") ||
+                stageCorpus.contains("telah tiba") || stageCorpus.contains("selesai") ||
+                (stageCorpus.contains("tiba") && !stageCorpus.contains("hampir tiba") && !etaEstimate) -> 3
+            stageCorpus.contains("hampir tiba") || stageCorpus.contains("menuju") ||
+                stageCorpus.contains("diantar") || stageCorpus.contains("dalam perjalanan") -> 2
+            stageCorpus.contains("disiapkan") || stageCorpus.contains("menyiapkan") ||
+                stageCorpus.contains("diproses") -> 1
             else -> null
         }
         if (debug) android.util.Log.w(
