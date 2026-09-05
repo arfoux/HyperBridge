@@ -151,6 +151,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             "DELIVERY-BANNER pkg=${sbn.packageName} " +
                 (if (banner != null) "found=${banner.width}x${banner.height}" else "null->logo")
         )
+        if (debug) android.util.Log.w(
+            "HyperBridgeDebug",
+            "DELIVERY-BANNER-ACTIONS pkg=${sbn.packageName} " +
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpImageActions(
+                    context,
+                    sbn.packageName,
+                    sbn.notification.contentView,
+                    sbn.notification.bigContentView,
+                    sbn.notification.headsUpContentView
+                )
+        )
         // coverKey = banner bila ada, else logo (shade + big island kiri pakai ini)
         val coverKey = if (banner != null) {
             builder.addPicture(HyperPicture(picKey, banner))

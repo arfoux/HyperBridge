@@ -27,6 +27,59 @@ object RemoteViewsExtractor {
     /** Banner dianggap persegi panjang (landscape) bila w/h melebihi rasio ini. */
     private const val WIDE_ASPECT = 1.2f
 
+    /**
+     * Inventarisasi SEMUA aksi gambar di RemoteViews (debug): method + viewId +
+     * nama resource + ukuran, agar ketahuan elemen mana yang jadi banner.
+     * Best-effort, tidak pernah throw.
+     */
+    fun dumpImageActions(
+        appContext: Context,
+        packageName: String,
+        vararg views: RemoteViews?
+    ): String {
+        val out = mutableListOf<String>()
+        val senderCtx = try {
+            appContext.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY)
+        } catch (_: Exception) { null }
+        fun resName(id: Int): String {
+            if (id == 0 || senderCtx == null) return "id=$id"
+            return try {
+                senderCtx.resources.getResourceEntryName(id)
+            } catch (_: Exception) { "id=$id" }
+        }
+        for (rv in views) {
+            if (rv == null) continue
+            try {
+                val field = RemoteViews::class.java.getDeclaredField("mActions")
+                field.isAccessible = true
+                @Suppress("UNCHECKED_CAST")
+                val actions = field.get(rv) as? ArrayList<*> ?: continue
+                for (action in actions) {
+                    if (action == null) continue
+                    try {
+                        val cls = action.javaClass
+                        val method = readActionField(action, "methodName") as? String
+                            ?: if ((cls.simpleName ?: "").contains("BitmapReflectionAction")) "setImageViewBitmap"
+                            else continue
+                        if (!method.startsWith("setImageView") && !method.startsWith("setImage")) continue
+                        val viewId = (readActionField(action, "viewId") as? Int) ?: 0
+                        val value = readActionField(action, "value")
+                            ?: readActionField(action, "bitmap")
+                        val detail = when (value) {
+                            is Bitmap -> "bitmap ${value.width}x${value.height}"
+                            is Int -> "res ${resName(value)}"
+                            is Icon -> "icon type=${value.type}"
+                            is Uri -> "uri $value"
+                            else -> "?"
+                        }
+                        out.add("$method@${resName(viewId)} $detail")
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+        return out.distinct().joinToString(" | ")
+    }
+
     fun extractTexts(remoteViews: RemoteViews?, debugLogging: Boolean = true): List<String> {
         if (remoteViews == null) return emptyList()
         return try {
