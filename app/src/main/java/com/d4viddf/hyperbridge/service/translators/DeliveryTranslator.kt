@@ -99,8 +99,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
 
-        // 3. Picture (app icon / large icon)
-        builder.addPicture(resolveIcon(sbn, picKey))
+        // 3. Picture: banner persegi panjang dari custom RemoteViews bila ada, fallback icon.
+        val banner = try {
+            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBannerBitmap(
+                context,
+                sbn.packageName,
+                sbn.notification.contentView,
+                sbn.notification.bigContentView,
+                sbn.notification.headsUpContentView
+            )
+        } catch (_: Exception) { null }
+        builder.addPicture(if (banner != null) HyperPicture(picKey, banner) else resolveIcon(sbn, picKey))
         builder.addPicture(getTransparentPicture("hidden_pixel"))
 
         // 4. Actions (up to 3)
