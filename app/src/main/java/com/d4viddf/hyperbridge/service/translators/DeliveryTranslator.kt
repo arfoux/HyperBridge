@@ -63,6 +63,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             "DELIVERY-RV-FULL pkg=${sbn.packageName} n=${rvAll.size} " +
                 "texts=[${rvAll.joinToString(" | ")}]"
         )
+        // [DEBUG] dump total hierarki + aksi (di-chunk): pemetaan menyusul setelah data ada
+        if (debug) com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpRemoteViewsFull(
+            context,
+            sbn.packageName,
+            sbn.packageName,
+            sbn.notification.contentView,
+            sbn.notification.bigContentView,
+            sbn.notification.headsUpContentView
+        )
         // Fallback eligible: title -> bigTitle -> RemoteViews -> appLabel -> type_delivery
         var title = effectiveTitle.ifEmpty {
             extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim() ?: ""

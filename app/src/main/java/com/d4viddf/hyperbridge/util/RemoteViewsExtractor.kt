@@ -28,6 +28,130 @@ object RemoteViewsExtractor {
     private const val WIDE_ASPECT = 1.2f
 
     /**
+     * Dump TOTAL RemoteViews untuk diagnosa 100%: semua mActions (method@view +
+     * ringkasan value) + seluruh hierarki hasil inflate (kelas, nama id,
+     * visibility, teks aktual, drawable, ukuran terukur). Di-chunk per ~3000
+     * char agar muat batas baris logcat. Best-effort, tidak pernah throw.
+     */
+    fun dumpRemoteViewsFull(
+        appContext: Context,
+        packageName: String,
+        pkg: String,
+        vararg views: RemoteViews?
+    ) {
+        try {
+            val senderCtx = try {
+                appContext.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY)
+            } catch (_: Exception) { null }
+            fun resName(id: Int): String {
+                if (id == 0 || senderCtx == null) return "id=$id"
+                return try {
+                    senderCtx.resources.getResourceEntryName(id)
+                } catch (_: Exception) { "id=$id" }
+            }
+            val lines = mutableListOf<String>()
+            val labels = arrayOf("content", "big", "headsUp")
+            views.forEachIndexed { vi, rv ->
+                if (rv == null) return@forEachIndexed
+                val label = labels.getOrElse(vi) { "v$vi" }
+                lines.add("[$label layout=${resName(rv.layoutId)}]")
+                // (a) semua actions
+                try {
+                    val field = RemoteViews::class.java.getDeclaredField("mActions")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val actions = field.get(rv) as? ArrayList<*> ?: emptyList<Any>()
+                    for (action in actions) {
+                        if (action == null) continue
+                        try {
+                            val cls = action.javaClass
+                            val method = readActionField(action, "methodName") as? String
+                                ?: cls.simpleName ?: "?"
+                            val viewId = (readActionField(action, "viewId") as? Int) ?: 0
+                            val value = readActionField(action, "value")
+                                ?: readActionField(action, "bitmap")
+                            val detail = when (value) {
+                                is CharSequence -> "'${value.toString().take(80)}'"
+                                is Bitmap -> "bitmap ${value.width}x${value.height}"
+                                is Int -> if (method.contains("esource", true) || method.contains("iew", true)) "res ${resName(value)}" else "$value"
+                                is Boolean -> "$value"
+                                is Icon -> "icon type=${value.type}"
+                                is Uri -> "uri $value"
+                                null -> "null"
+                                else -> value.javaClass.simpleName
+                            }
+                            lines.add("[$label] $method@${resName(viewId)}=$detail")
+                        } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {}
+                // (b) hierarki inflate: measure + walk
+                try {
+                    if (senderCtx != null) {
+                        val root = rv.apply(senderCtx, null) ?: return@forEachIndexed
+                        val dm = appContext.resources.displayMetrics
+                        val wSpec = android.view.View.MeasureSpec.makeMeasureSpec(dm.widthPixels, android.view.View.MeasureSpec.AT_MOST)
+                        val hSpec = android.view.View.MeasureSpec.makeMeasureSpec(dm.heightPixels, android.view.View.MeasureSpec.AT_MOST)
+                        root.measure(wSpec, hSpec)
+                        root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+                        walkViews(root, lines, label, senderCtx)
+                    }
+                } catch (_: Exception) {}
+            }
+            // chunk ~3000 char per baris log
+            val chunks = mutableListOf<String>()
+            val cur = StringBuilder()
+            for (ln in lines) {
+                if (cur.length + ln.length + 3 > 3000) {
+                    chunks.add(cur.toString())
+                    cur.clear()
+                }
+                cur.append(ln).append(" || ")
+            }
+            if (cur.isNotEmpty()) chunks.add(cur.toString())
+            chunks.forEachIndexed { i, c ->
+                android.util.Log.w("HyperBridgeDebug", "DELIVERY-RV-DUMP pkg=$pkg ${i + 1}/${chunks.size} $c")
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun walkViews(
+        view: android.view.View,
+        lines: MutableList<String>,
+        label: String,
+        senderCtx: Context
+    ) {
+        try {
+            val cls = view.javaClass.simpleName
+            val idName = try {
+                if (view.id != 0 && view.id != -1) senderCtx.resources.getResourceEntryName(view.id) else "-"
+            } catch (_: Exception) { "?" }
+            val vis = when (view.visibility) {
+                android.view.View.VISIBLE -> "V"
+                android.view.View.INVISIBLE -> "I"
+                else -> "G"
+            }
+            val extra = when (view) {
+                is android.widget.TextView -> " text='${view.text?.toString()?.take(60)}'"
+                is android.widget.ImageView -> {
+                    val d = try { view.drawable } catch (_: Exception) { null }
+                    val ds = if (d != null) " drawable=${d.javaClass.simpleName} ${d.intrinsicWidth}x${d.intrinsicHeight}" else " drawable=null"
+                    ds
+                }
+                is android.widget.ProgressBar -> " progress=${try { view.progress } catch (_: Exception) { "?" }}/${try { view.max } catch (_: Exception) { "?" }}"
+                else -> ""
+            }
+            lines.add("[$label] <$cls id=$idName vis=$vis ${view.measuredWidth}x${view.measuredHeight}$extra>")
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    try {
+                        walkViews(view.getChildAt(i), lines, label, senderCtx)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
      * Inventarisasi SEMUA aksi gambar di RemoteViews (debug): method + viewId +
      * nama resource + ukuran, agar ketahuan elemen mana yang jadi banner.
      * Best-effort, tidak pernah throw.
