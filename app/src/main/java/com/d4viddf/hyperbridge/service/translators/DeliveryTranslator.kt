@@ -123,7 +123,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Stage driver-resto-tujuan dari keyword status (tahap tertinggi menang).
         // Hati-hati: "tiba pada HH:MM" = ESTIMASI (bukan tiba beneran), "hampir tiba" = masih jalan.
         val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" ")).lowercase()
-        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}:\\d{2}").containsMatchIn(stageCorpus)
+        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}:\\d{2}|estimasi\\s+tiba|tiba\\s+dalam").containsMatchIn(stageCorpus)
         val stage = when {
             stageCorpus.contains("selamat menikmati") || stageCorpus.contains("sudah tiba") ||
                 stageCorpus.contains("telah tiba") || stageCorpus.contains("selesai") ||
@@ -213,10 +213,40 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         )
         // 6a. Cover persegi: banner + resto + ETA (gambar tidak kepotong lingkaran)
         builder.setCoverInfo(coverKey, title, text, eta)
-        // 6b. Progress oranye: 3-titik driver-resto-tujuan bila stage ketemu,
-        // fallback progress bar bila notif kirim progress.
+        // 6b. Progress oranye: setStepProgress (bila sistem render) + progress bar
+        // gaya taksi/delivery dengan IKON ASLI pengirim (driver bergerak di garis).
+        // Percent dari stage: 1->33, 2->66, 3->100 (penuh seperti ori saat tiba).
         if (stage != null) {
             builder.setStepProgress(stage, 3, themeColor)
+            try {
+                val icons = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractNamedIconBitmaps(
+                    context,
+                    sbn.packageName,
+                    sbn.notification.bigContentView,
+                    sbn.notification.contentView
+                )
+                fun iconKey(match: String): String? {
+                    val e = icons.entries.find { it.key.contains(match, ignoreCase = true) }
+                    if (e == null) return null
+                    val k = "delivery_prog_$match"
+                    builder.addPicture(HyperPicture(k, e.value))
+                    return k
+                }
+                val fwd = iconKey("driver")
+                val mid = iconKey("stage")
+                val end = iconKey("destination")
+                if (debug) android.util.Log.w(
+                    "HyperBridgeDebug",
+                    "DELIVERY-PROGRESS pkg=${sbn.packageName} stage=$stage fwd=$fwd mid=$mid end=$end"
+                )
+                builder.setProgressBar(
+                    progress = (stage * 100) / 3,
+                    color = themeColor,
+                    picForwardKey = fwd,
+                    picMiddleKey = mid,
+                    picEndKey = end ?: "hidden_pixel"
+                )
+            } catch (_: Exception) {}
         } else if (hasProgress) {
             builder.setProgressBar(
                 progress = percent,

@@ -457,8 +457,7 @@ object RemoteViewsExtractor {
         collectImageViewBitmaps(root, out)
     }
 
-    private fun collectImageViewBitmaps(view: android.view.View, out: MutableList<Bitmap>) {
-        try {
+    private fun collectImageViewBitmaps(view: android.view.View, out: MutableList<Bitmap>) {        try {
             if (view is ImageView) {
                 try {
                     val drawable = view.drawable
@@ -471,6 +470,61 @@ object RemoteViewsExtractor {
                 for (i in 0 until view.childCount) {
                     try {
                         collectImageViewBitmaps(view.getChildAt(i), out)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Kumpulkan bitmap ImageView beserta NAMA resource id-nya (mis. iv_stage_icon,
+     * iv_driver_icon, iv_destination_icon) dari hasil inflate. Untuk progress bar
+     * yang pakai ikon asli pengirim. Best-effort, tidak pernah throw.
+     */
+    fun extractNamedIconBitmaps(
+        appContext: Context,
+        packageName: String,
+        vararg views: RemoteViews?
+    ): Map<String, Bitmap> {
+        val out = linkedMapOf<String, Bitmap>()
+        try {
+            val senderCtx = try {
+                appContext.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY)
+            } catch (_: Exception) { return out }
+            for (rv in views) {
+                if (rv == null) continue
+                try {
+                    val root = rv.apply(senderCtx, null) ?: continue
+                    collectNamedBitmaps(root, senderCtx, out)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        return out
+    }
+
+    private fun collectNamedBitmaps(
+        view: android.view.View,
+        senderCtx: Context,
+        out: MutableMap<String, Bitmap>
+    ) {
+        try {
+            if (view is ImageView) {
+                try {
+                    val name = try {
+                        if (view.id != 0 && view.id != -1) senderCtx.resources.getResourceEntryName(view.id) else null
+                    } catch (_: Exception) { null } ?: return
+                    if (!out.containsKey(name)) {
+                        val drawable = try { view.drawable } catch (_: Exception) { null }
+                        if (drawable != null) {
+                            drawableToBitmap(drawable)?.let { out[name] = it }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) {
+                    try {
+                        collectNamedBitmaps(view.getChildAt(i), senderCtx, out)
                     } catch (_: Exception) {}
                 }
             }
