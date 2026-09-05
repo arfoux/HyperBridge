@@ -66,8 +66,11 @@ object RemoteViewsExtractor {
                         try {
                             val cls = action.javaClass
                             val method = readActionField(action, "methodName") as? String
+                                ?: readActionField(action, "mMethodName") as? String
                                 ?: cls.simpleName ?: "?"
-                            val viewId = (readActionField(action, "viewId") as? Int) ?: 0
+                            val viewId = (readActionField(action, "viewId") as? Int)
+                                ?: (readActionField(action, "mViewId") as? Int)
+                                ?: 0
                             val value = readActionField(action, "value")
                                 ?: readActionField(action, "bitmap")
                             val detail = when (value) {
@@ -87,7 +90,12 @@ object RemoteViewsExtractor {
                 // (b) hierarki inflate: measure + walk
                 try {
                     if (senderCtx != null) {
-                        val root = rv.apply(senderCtx, null) ?: return@forEachIndexed
+                        val root = try {
+                            rv.apply(senderCtx, null)
+                        } catch (e: Exception) {
+                            lines.add("[$label] inflate FAILED ${e.javaClass.simpleName}")
+                            null
+                        } ?: return@forEachIndexed
                         val dm = appContext.resources.displayMetrics
                         val wSpec = android.view.View.MeasureSpec.makeMeasureSpec(dm.widthPixels, android.view.View.MeasureSpec.AT_MOST)
                         val hSpec = android.view.View.MeasureSpec.makeMeasureSpec(dm.heightPixels, android.view.View.MeasureSpec.AT_MOST)
@@ -135,7 +143,9 @@ object RemoteViewsExtractor {
                 is android.widget.ImageView -> {
                     val d = try { view.drawable } catch (_: Exception) { null }
                     val ds = if (d != null) " drawable=${d.javaClass.simpleName} ${d.intrinsicWidth}x${d.intrinsicHeight}" else " drawable=null"
-                    ds
+                    val bg = try { view.background } catch (_: Exception) { null }
+                    val bs = if (bg != null) " bg=${bg.javaClass.simpleName} ${bg.intrinsicWidth}x${bg.intrinsicHeight}" else ""
+                    ds + bs
                 }
                 is android.widget.ProgressBar -> " progress=${try { view.progress } catch (_: Exception) { "?" }}/${try { view.max } catch (_: Exception) { "?" }}"
                 else -> ""
