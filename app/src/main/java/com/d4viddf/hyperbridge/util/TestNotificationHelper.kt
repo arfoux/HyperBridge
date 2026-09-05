@@ -35,6 +35,9 @@ object TestNotificationHelper {
     const val REAL_CHANNEL_ID = "SHOPEE_LIVE_ACTIVITY_ID"
     private const val REAL_BASE_ID = 91000
 
+    private const val TEST_CHANNEL_ID = "hyperbridge_test_channel"
+    private const val TEST_BASE_ID = 90000
+
     /** 4 observable ShopeeFood stages, text cloned 1:1 from real notifs (see DELIVERY_VERIFY pattern). */
     enum class DeliveryStage(val title: String, val text: String, val liveId: String) {
         DISIAPKAN(
