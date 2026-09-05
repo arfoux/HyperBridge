@@ -1172,7 +1172,7 @@ class NotificationReaderService : NotificationListenerService() {
 
         // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device (Log.w biar tidak di-strip proguard)
         if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity || isShopeeFoodEligible) {
-            Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)}")
+            Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)} keys=${extras.keySet().joinToString()}")
         }
 
         return when {
@@ -1527,6 +1527,22 @@ class NotificationReaderService : NotificationListenerService() {
                         } catch (_: Exception) {}
                     }
                     cleanupCache(key)
+                }
+                // Active non-native notifications that were never posted through us (service
+                // freshly connected after install/reboot/process death): route them through
+                // the normal posted pipeline so ongoing notifications (e.g. ShopeeFood order)
+                // still get bridged. Dedup/contentHash/recentlyRemoved guards live inside
+                // onNotificationPosted -> processStandardNotification; skip already-tracked
+                // keys so the periodic tick stays a no-op when nothing is missing.
+                val pendingSync = currentNotifications.filter { sbn ->
+                    sbn.packageName != packageName &&
+                        !nativeIslands.contains(sbn.key) &&
+                        !activeIslands.containsKey(sbn.key)
+                }
+                for (sbn in pendingSync) {
+                    try {
+                        onNotificationPosted(sbn)
+                    } catch (_: Exception) {}
                 }
 
                 // Bridged notifications we no longer track (e.g. left over from a service restart)

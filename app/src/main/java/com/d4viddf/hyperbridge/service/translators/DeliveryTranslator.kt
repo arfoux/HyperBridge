@@ -44,7 +44,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 "progress=${extras.getInt(Notification.EXTRA_PROGRESS, 0)}/" +
                 "${extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)} " +
                 "live='${extras.getString("extra_live_activity_id")}' " +
-                "tpl='${extras.getString(Notification.EXTRA_TEMPLATE)}' custom=${extras.getBoolean("android.contains.customView")}"
+                "tpl='${extras.getString(Notification.EXTRA_TEMPLATE)}' custom=${extras.getBoolean("android.contains.customView")} " +
+                "keys=${extras.keySet().joinToString()}"
         )
         // Fallback eligible: title -> bigTitle -> RemoteViews -> appLabel -> type_delivery
         var title = effectiveTitle.ifEmpty {
