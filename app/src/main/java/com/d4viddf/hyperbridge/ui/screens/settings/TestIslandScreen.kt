@@ -151,6 +151,43 @@ fun TestIslandScreen(onBack: () -> Unit) {
             }
 
             item {
+                Text("DELIVERY REAL-clone per stage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "Post via NotificationManager (channel SHOPEE_LIVE_ACTIVITY_ID + liveId) — masuk pipeline REAL, bukan bypass. Banner asli tetap hanya dari notif Shopee sungguhan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        TestNotificationHelper.DeliveryStage.entries.forEach { stage ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stage.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(onClick = {
+                                    TestNotificationHelper.postRealDeliveryClone(context, stage)
+                                }) { Text("Post") }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        OutlinedButton(onClick = {
+                            TestNotificationHelper.cancelRealClones(context)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Cancel semua") }
+                    }
+                }
+            }
+
+            item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier

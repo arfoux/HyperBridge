@@ -27,9 +27,37 @@ object TestNotificationHelper {
 
     const val EXTRA_TEST = "hyperbridge_test"
     const val EXTRA_TEST_TYPE = "hyperbridge_test_type"
+    /** Marker for DELIVERY REAL-clone posts: must pass onNotificationPosted gates (never hyperbridge_test). */
+    const val EXTRA_REAL_CLONE = "hyperbridge_real_clone"
+    const val EXTRA_REAL_STAGE = "hyperbridge_real_stage"
 
-    private const val TEST_CHANNEL_ID = "hyperbridge_test_channel"
-    private const val TEST_BASE_ID = 90000
+    /** Same channel id as the real ShopeeFood live activity (DELIVERY_VERIFY pattern). */
+    const val REAL_CHANNEL_ID = "SHOPEE_LIVE_ACTIVITY_ID"
+    private const val REAL_BASE_ID = 91000
+
+    /** 4 observable ShopeeFood stages, text cloned 1:1 from real notifs (see DELIVERY_VERIFY pattern). */
+    enum class DeliveryStage(val title: String, val text: String, val liveId: String) {
+        DISIAPKAN(
+            "Resto sedang menyiapkan pesananmu",
+            "DKRIUK KS TUBUN \u2022 Estimasi tiba dalam 32 menit",
+            "shopee_food_orders_disiapkan"
+        ),
+        MENUJU(
+            "Driver sedang menuju Resto",
+            "Driver sedang menuju ke Resto \u2022 Tiba pada 19:20",
+            "shopee_food_orders_menuju"
+        ),
+        TIBA(
+            "Pesananmu sudah tiba!",
+            "Terima kasih sudah memesan \u2022 Selamat menikmati!",
+            "shopee_food_orders_tiba"
+        ),
+        SELESAI(
+            "Selamat menikmati!",
+            "Jangan lupa beri nilai untuk pesananmu",
+            "shopee_food_orders_selesai"
+        );
+    }
 
     private fun ensureTestChannel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -39,6 +67,55 @@ object TestNotificationHelper {
             enableVibration(false)
         }
         nm.createNotificationChannel(ch)
+    }
+    private fun ensureRealChannel(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val ch = NotificationChannel(REAL_CHANNEL_ID, "Shopee Live Activity (test clone)", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "REAL-pipeline clone of ShopeeFood live activity for stage testing"
+        }
+        nm.createNotificationChannel(ch)
+    }
+
+    /**
+     * Post DELIVERY REAL clone via NotificationManager (bukan bypass HyperIsland).
+     * Pola 1:1 notif ShopeeFood asli: NotificationCompat.Builder(context, "SHOPEE_LIVE_ACTIVITY_ID")
+     * + extra "extra_live_activity_id"=shopee_food_orders_* + DecoratedCustomViewStyle + title/text per stage.
+     * Masuk onNotificationPosted REAL (detect -> DeliveryTranslator -> mapping), tercatat sebagai REAL di log/history.
+     *
+     * JUJUR: banner/gambar promo ShopeeFood asli tidak bisa difabrikasi — bitmap itu milik app Shopee dan
+     * hanya ada di RemoteViews notif real. Clone ini pakai fallback logo; yang diuji 1:1 adalah
+     * channel, liveId, template style, judul/teks/stage/ETA, dan alur detect+translator+mapping.
+     */
+    fun postRealDeliveryClone(context: Context, stage: DeliveryStage) {
+        ensureRealChannel(context)
+        val id = REAL_BASE_ID + stage.ordinal
+        val builder = NotificationCompat.Builder(context, REAL_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(stage.title)
+            .setContentText(stage.text)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setContentIntent(dummyPendingIntent(context, 9100 + stage.ordinal))
+        // extra liveId WAJIB sebelum build agar terbaca detectNotificationType (isLiveActivity -> DELIVERY)
+        builder.addExtras(Bundle().apply {
+            putString("extra_live_activity_id", stage.liveId)
+            putBoolean(EXTRA_REAL_CLONE, true)
+            putString(EXTRA_REAL_STAGE, stage.name)
+        })
+        val notif = builder.build()
+        // addExtras kadang tidak survive build di semua versi compat — tulis ulang langsung ke extras final
+        notif.extras.putString("extra_live_activity_id", stage.liveId)
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, stage.name)
+        context.getSystemService(NotificationManager::class.java).notify(id, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED REAL-CLONE stage=${stage.name} id=$id live=${stage.liveId} ch=$REAL_CHANNEL_ID")
+    }
+
+    fun cancelRealClones(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        DeliveryStage.entries.forEach { nm.cancel(REAL_BASE_ID + it.ordinal) }
+        android.util.Log.w("HyperBridgeTest", "CANCELED REAL-CLONES")
     }
 
     /**

@@ -631,13 +631,17 @@ class NotificationReaderService : NotificationListenerService() {
                 }
             }
 
-            if (shouldIgnore(it.packageName)) {
+            // REAL-clone test posts (own pkg + hyperbridge_real_clone): must enter the REAL pipeline
+            // (detect -> translator -> mapping) so stage/ETA/layout are genuinely exercised.
+            val isRealClone = it.packageName == packageName &&
+                it.notification.extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
+            if (shouldIgnore(it.packageName) && !isRealClone) {
                 if (debugLogEnabled()) Log.w(TAG, "IGNORE pkg=${it.packageName}")
                 return
             }
             // Shopee LIVE_ACTIVITY eligible bypass isAppAllowed jika user pernah aktifin shopee (atau auto-allow)
             val isShopeeLive = it.packageName == "com.shopee.id" && it.notification.extras.containsKey("extra_live_activity_id")
-            if (!isAppAllowed(it.packageName)) {
+            if (!isAppAllowed(it.packageName) && !isRealClone) {
                 if (isShopeeLive) {
                     if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
                     serviceScope.launch { preferences.toggleApp(it.packageName, true) }
@@ -645,18 +649,20 @@ class NotificationReaderService : NotificationListenerService() {
                     if (debugLogEnabled()) Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
                     return
                 }
+            } else if (isRealClone && debugLogEnabled()) {
+                Log.w(TAG, "BYPASS gates for REAL-CLONE ${it.key} stage=${it.notification.extras.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_STAGE)}")
             }
 
             processingJobs[it.key]?.cancel()
-
             val job = serviceScope.launch {
                 val isJunk = isJunkNotification(it)
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
-                if (isJunk && !isShopeeLive) {
+                // REAL-clone juga jangan dianggap junk: marker + liveId + title/text selalu non-empty.
+                if (isJunk && !isShopeeLive && !isRealClone) {
                     if (debugLogEnabled()) Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
                     return@launch
                 }
-                if (isJunk && isShopeeLive) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for Shopee LIVE ${it.key}")
+                if (isJunk && (isShopeeLive || isRealClone)) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for ${if (isRealClone) "REAL-CLONE" else "Shopee LIVE"} ${it.key}")
                 processStandardNotification(it)
             }
             processingJobs[it.key] = job
