@@ -531,6 +531,32 @@ object RemoteViewsExtractor {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Simpan bitmap ke filesDir/dump_<tag>/ untuk ditarik via adb (100% data asli).
+     * Kembalikan path yang berhasil. Best-effort, tidak pernah throw.
+     */
+    fun saveBitmaps(
+        appContext: Context,
+        tag: String,
+        named: Map<String, Bitmap>
+    ): List<String> {
+        val out = mutableListOf<String>()
+        try {
+            val dir = java.io.File(appContext.filesDir, "dump_$tag")
+            if (!dir.exists()) dir.mkdirs()
+            for ((name, bmp) in named) {
+                try {
+                    if (bmp.isRecycled || bmp.width <= 0 || bmp.height <= 0) continue
+                    val safe = name.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+                    val f = java.io.File(dir, "$safe.png")
+                    f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    out.add(f.absolutePath)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        return out
+    }
+
     private fun drawableToBitmap(drawable: Drawable): Bitmap? {
         return try {
             if (drawable is BitmapDrawable) {

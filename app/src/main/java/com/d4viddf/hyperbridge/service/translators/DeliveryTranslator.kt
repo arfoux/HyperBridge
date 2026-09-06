@@ -218,6 +218,18 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         } else {
             logoKey
         }
+        // [DEBUG] simpan bitmap asli ke filesDir untuk ditarik via adb (100% data)
+        if (debug && banner != null) {
+            try {
+                val saved = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.saveBitmaps(
+                    context, sbn.key.hashCode().toString(), mapOf("banner" to banner)
+                )
+                if (saved.isNotEmpty()) android.util.Log.w(
+                    "HyperBridgeDebug",
+                    "DELIVERY-SAVE pkg=${sbn.packageName} files=[${saved.joinToString(" | ")}]"
+                )
+            } catch (_: Exception) {}
+        }
         builder.addPicture(getTransparentPicture("hidden_pixel"))
 
         // 4. Actions (up to 3)
@@ -273,6 +285,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                     "HyperBridgeDebug",
                     "DELIVERY-PROGRESS pkg=${sbn.packageName} stage=$stage fwd=$fwd mid=$mid end=$end"
                 )
+                if (debug) {
+                    try {
+                        val saved = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.saveBitmaps(
+                            context, sbn.key.hashCode().toString(), icons
+                        )
+                        if (saved.isNotEmpty()) android.util.Log.w(
+                            "HyperBridgeDebug",
+                            "DELIVERY-SAVE pkg=${sbn.packageName} files=[${saved.joinToString(" | ")}]"
+                        )
+                    } catch (_: Exception) {}
+                }
                 builder.setProgressBar(
                     progress = progressPercent ?: ((stage * 100) / 3),
                     color = themeColor,
