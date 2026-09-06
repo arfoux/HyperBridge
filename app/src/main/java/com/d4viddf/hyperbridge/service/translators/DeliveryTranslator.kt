@@ -2,6 +2,8 @@ package com.d4viddf.hyperbridge.service.translators
 
 import android.app.Notification
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.service.notification.StatusBarNotification
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
@@ -18,6 +20,22 @@ import io.github.d4viddf.hyperisland_kit.models.PicInfo
 import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
+
+    /**
+     * Ganjal bitmap ke kanvas persegi transparan (tengah) agar slot pill yang
+     * kotak tidak menarik (stretch) gambar — rasio asli aman.
+     */
+    private fun padToSquare(src: Bitmap): Bitmap {
+        return try {
+            if (src.isRecycled || src.width <= 0 || src.height <= 0) return src
+            if (src.width == src.height) return src
+            val size = maxOf(src.width, src.height)
+            val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawBitmap(src, ((size - src.width) / 2f), ((size - src.height) / 2f), null)
+            out
+        } catch (_: Exception) { src }
+    }
     private val preferences = AppPreferences(context)
 
     fun translate(
@@ -111,9 +129,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 }
             } catch (_: Exception) {}
         }
-        // ETA kanan: regex dari teks RemoteViews dulu, fallback teks biasa
+        // ETA kanan: regex dari teks RemoteViews dulu, fallback teks biasa.
+        // Format waktu Indonesia pakai titik: 14.08 - 14.18
         val etaRegex = Regex(
-            "tiba pada\\s+\\d{1,2}:\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
+            "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
             RegexOption.IGNORE_CASE
         )
         val eta = etaRegex.find(rvAll.joinToString(" • "))?.value
@@ -143,6 +162,21 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val current = extras.getInt(Notification.EXTRA_PROGRESS, 0)
         val hasProgress = max > 0
         val percent = if (hasProgress) ((current.toFloat() / max.toFloat()) * 100).toInt() else 0
+
+        // Persen garis dari sub-stage (bukan stage/3 kasar): menuju resto masih awal.
+        val lowerAll = stageCorpus
+        val progressPercent = when {
+            stage == null -> null
+            lowerAll.contains("selamat menikmati") || lowerAll.contains("sudah tiba") ||
+                lowerAll.contains("telah tiba") || lowerAll.contains("selesai") -> 100
+            lowerAll.contains("hampir tiba") || lowerAll.contains("menuju lokasi") ||
+                lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") -> 70
+            lowerAll.contains("menuju resto") || lowerAll.contains("menuju ke resto") ||
+                lowerAll.contains("menuju") -> 35
+            lowerAll.contains("disiapkan") || lowerAll.contains("menyiapkan") ||
+                lowerAll.contains("diproses") -> 15
+            else -> (stage * 100) / 3
+        }
 
         val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", title)
         builder.setEnableFloat(config.isFloat ?: false)
@@ -229,7 +263,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                     val e = icons.entries.find { it.key.contains(match, ignoreCase = true) }
                     if (e == null) return null
                     val k = "delivery_prog_$match"
-                    builder.addPicture(HyperPicture(k, e.value))
+                    builder.addPicture(HyperPicture(k, padToSquare(e.value)))
                     return k
                 }
                 val fwd = iconKey("driver")
@@ -240,7 +274,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                     "DELIVERY-PROGRESS pkg=${sbn.packageName} stage=$stage fwd=$fwd mid=$mid end=$end"
                 )
                 builder.setProgressBar(
-                    progress = (stage * 100) / 3,
+                    progress = progressPercent ?: ((stage * 100) / 3),
                     color = themeColor,
                     picForwardKey = fwd,
                     picMiddleKey = mid,

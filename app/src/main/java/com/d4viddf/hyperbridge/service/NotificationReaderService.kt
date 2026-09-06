@@ -968,7 +968,15 @@ class NotificationReaderService : NotificationListenerService() {
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
 
-            val newContentHash = data.jsonParam.hashCode()
+            val newContentHash = data.jsonParam.hashCode() + if (type == NotificationType.DELIVERY) {
+                // Update DELIVERY yang title/text-nya identik tapi isi RemoteViews berubah
+                // (posisi driver, ETA, ikon) harus tetap repost — campur signature RV ke hash.
+                try {
+                    (com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView, false) +
+                        com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView, false))
+                        .joinToString("|").hashCode()
+                } catch (_: Exception) { 0 }
+            } else 0
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
 
             kotlinx.coroutines.yield()
