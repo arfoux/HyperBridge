@@ -144,13 +144,21 @@ object RemoteViewsExtractor {
                     val d = try { view.drawable } catch (_: Exception) { null }
                     val ds = if (d != null) " drawable=${d.javaClass.simpleName} ${d.intrinsicWidth}x${d.intrinsicHeight}" else " drawable=null"
                     val bg = try { view.background } catch (_: Exception) { null }
-                    val bs = if (bg != null) " bg=${bg.javaClass.simpleName} ${bg.intrinsicWidth}x${bg.intrinsicHeight}" else ""
+                    val bs = when (bg) {
+                        is android.graphics.drawable.ColorDrawable -> " bg=#${Integer.toHexString(bg.color)}"
+                        is android.graphics.drawable.GradientDrawable -> try {
+                            val cs = bg.colors
+                            if (cs != null && cs.isNotEmpty()) " bg=gradient#${Integer.toHexString(cs[0])}" else " bg=gradient?"
+                        } catch (_: Exception) { " bg=gradient?" }
+                        null -> ""
+                        else -> " bg=${bg.javaClass.simpleName}"
+                    }
                     ds + bs
                 }
                 is android.widget.ProgressBar -> " progress=${try { view.progress } catch (_: Exception) { "?" }}/${try { view.max } catch (_: Exception) { "?" }}"
                 else -> ""
             }
-            lines.add("[$label] <$cls id=$idName vis=$vis ${view.measuredWidth}x${view.measuredHeight}$extra>")
+            lines.add("[$label] <$cls id=$idName vis=$vis ${view.measuredWidth}x${view.measuredHeight} pad=${view.paddingLeft},${view.paddingTop},${view.paddingRight},${view.paddingBottom}$extra>")
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) {
                     try {
@@ -592,6 +600,25 @@ object RemoteViewsExtractor {
                 lowerAll.contains("diproses") -> 15
             else -> (stage * 100) / 3
         }
+    }
+
+    /**
+     * Meta level notifikasi (di luar RemoteViews): flags, category, group,
+     * timeout, actions, channel, visibility. Best-effort, tidak pernah throw.
+     */
+    fun dumpNotificationMeta(sbn: android.service.notification.StatusBarNotification): String {
+        return try {
+            val n = sbn.notification
+            val acts = (n.actions ?: emptyArray()).joinToString("|") {
+                "${it.title}"
+            }
+            "key=${sbn.key} id=${sbn.id} flags=${n.flags} cat=${n.category} " +
+                "group=${n.group} sortKey=${n.sortKey} timeout=${n.timeoutAfter} " +
+                "ongoing=${0 != (n.flags and android.app.Notification.FLAG_ONGOING_EVENT)} " +
+                "autoCancel=${0 != (n.flags and android.app.Notification.FLAG_AUTO_CANCEL)} " +
+                "vis=${n.visibility} badgeIcon=${n.badgeIconType} actions=[$acts] " +
+                "when=${n.`when`} number=${n.number}"
+        } catch (_: Exception) { "meta-unavailable" }
     }
 
     private fun drawableToBitmap(drawable: Drawable): Bitmap? {

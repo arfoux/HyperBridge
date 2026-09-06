@@ -81,6 +81,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             "DELIVERY-RV-FULL pkg=${sbn.packageName} n=${rvAll.size} " +
                 "texts=[${rvAll.joinToString(" | ")}]"
         )
+        // [DEBUG] meta notif (flags/category/group/timeout/actions) — pemetaan menyusul
+        if (debug) android.util.Log.w(
+            "HyperBridgeDebug",
+            "DELIVERY-RV-META pkg=${sbn.packageName} " +
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpNotificationMeta(sbn)
+        )
         // [DEBUG] dump total hierarki + aksi (di-chunk): pemetaan menyusul setelah data ada
         if (debug) com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpRemoteViewsFull(
             context,
