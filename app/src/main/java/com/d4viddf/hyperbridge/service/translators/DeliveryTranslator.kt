@@ -211,10 +211,21 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                     sbn.notification.headsUpContentView
                 )
         )
-        // coverKey = banner bila ada, else logo (shade + big island kiri pakai ini)
+        // coverKey = banner live bila ada; untuk REAL-clone test boleh pakai banner
+        // sideload (test-only, bukan dari notif); else logo.
+        // (aset Shopee tidak dibundle repo — file hanya di HP via adb push)
+        val isRealClonePost = extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
         val coverKey = if (banner != null) {
             builder.addPicture(HyperPicture(picKey, banner))
             picKey
+        } else if (isRealClonePost) {
+            val testBanner = try {
+                com.d4viddf.hyperbridge.util.TestNotificationHelper.loadTestBanner(context)
+            } catch (_: Exception) { null }
+            if (testBanner != null) {
+                builder.addPicture(HyperPicture(picKey, testBanner))
+                picKey
+            } else logoKey
         } else {
             logoKey
         }

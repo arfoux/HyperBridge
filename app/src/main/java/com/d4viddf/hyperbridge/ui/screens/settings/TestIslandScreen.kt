@@ -216,6 +216,20 @@ fun TestIslandScreen(onBack: () -> Unit) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                TestNotificationHelper.postTinyBannerTest(context)
+                            }, modifier = Modifier.weight(1f)) { Text("Tiny banner") }
+                            OutlinedButton(onClick = {
+                                TestNotificationHelper.cancelTinyBannerTest(context)
+                            }) { Text("Cancel") }
+                        }
+                        Text(
+                            "Eksperimen: small pill custom view persegi (banner sideload). Kalau tetap bulat = slot sistem mentok.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
