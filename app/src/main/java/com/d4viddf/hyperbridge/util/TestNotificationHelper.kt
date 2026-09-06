@@ -205,6 +205,13 @@ object TestNotificationHelper {
                 val prog = if (type == NotificationType.PROGRESS) 45 else 62
                 builder.setProgressBar(progress = prog, color = themeColor, picForwardKey = picKey, picEndKey = "hidden_pixel")
             }
+            // DELIVERY test juga bergaris (mapping stage yang sama dengan translator REAL)
+            if (isDeliveryShopeeClone) {
+                val corpus = "$title $text"
+                val st = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus) ?: 2
+                val pct = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(st, corpus) ?: 66
+                builder.setProgressBar(progress = pct, color = themeColor, picForwardKey = picKey, picEndKey = "hidden_pixel")
+            }
 
             val resBundle = builder.buildResourceBundle()
             val json = builder.buildJsonParam()
@@ -235,56 +242,6 @@ object TestNotificationHelper {
             // Fallback: post via old NotificationManager path (akan di-ignore tapi tetap log)
             fallbackPostTest(context, type)
         }
-    }
-
-    /**
-     * EKSPERIMEN small pill persegi: island mini dengan custom RemoteViews
-     * (layout tiny_banner.xml) berisi banner sideload. Menjawab apakah slot
-     * small pill bisa tampil persegi panjang atau mentok lingkaran sistem.
-     */
-    fun postTinyBannerTest(context: Context) {
-        ensureTestChannel(context)
-        val id = 92000
-        try {
-            val bmp = loadTestBanner(context) ?: createFallbackBitmap(context)
-            val rv = android.widget.RemoteViews(context.packageName, R.layout.tiny_banner)
-            rv.setImageViewBitmap(R.id.tiny_banner_img, bmp)
-            val picKey = "test_tiny_${System.currentTimeMillis() % 10000}"
-            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(context, "test_tiny", "Tiny Banner")
-            builder.setEnableFloat(true)
-            builder.setShowNotification(true)
-            builder.setIslandFirstFloat(true)
-            builder.addPicture(io.github.d4viddf.hyperisland_kit.HyperPicture(picKey, bmp))
-            builder.setBaseInfo(type = 1, title = "Tiny Banner", content = "custom tiny view", pictureKey = picKey, actionKeys = emptyList())
-            builder.setSmallIsland(picKey)
-            builder.setCustomTinyRemoteView(rv)
-            builder.setIslandConfig(highlightColor = "#EE4D2D", expandedTimeMs = 10)
-            builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
-            val resBundle = builder.buildResourceBundle()
-            val json = builder.buildJsonParam()
-            val nm = NotificationManagerCompat.from(context)
-            val notifBuilder = NotificationCompat.Builder(context, TEST_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("Tiny Banner")
-                .setContentText("custom tiny view")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setOngoing(true)
-                .addExtras(resBundle)
-            val notif = notifBuilder.build()
-            notif.extras.putString("miui.focus.param", json)
-            notif.extras.putBoolean(EXTRA_TEST, true)
-            notif.extras.putString(EXTRA_TEST_TYPE, "TINY_BANNER")
-            nm.notify(id, notif)
-            android.util.Log.w("HyperBridgeTest", "POSTED TINY-BANNER id=$id")
-        } catch (e: Exception) {
-            android.util.Log.e("HyperBridgeTest", "postTinyBannerTest failed", e)
-        }
-    }
-
-    fun cancelTinyBannerTest(context: Context) {
-        try {
-            NotificationManagerCompat.from(context).cancel(92000)
-        } catch (_: Exception) {}
     }
 
     private fun createFallbackBitmap(context: Context): android.graphics.Bitmap {

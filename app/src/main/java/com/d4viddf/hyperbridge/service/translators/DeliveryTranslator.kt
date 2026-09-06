@@ -139,20 +139,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             ?: etaRegex.find(text)?.value
             ?: etaRegex.find(title)?.value
             ?: text.ifEmpty { title }
-        // Stage driver-resto-tujuan dari keyword status (tahap tertinggi menang).
-        // Hati-hati: "tiba pada HH:MM" = ESTIMASI (bukan tiba beneran), "hampir tiba" = masih jalan.
-        val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" ")).lowercase()
-        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}:\\d{2}|estimasi\\s+tiba|tiba\\s+dalam").containsMatchIn(stageCorpus)
-        val stage = when {
-            stageCorpus.contains("selamat menikmati") || stageCorpus.contains("sudah tiba") ||
-                stageCorpus.contains("telah tiba") || stageCorpus.contains("selesai") ||
-                (stageCorpus.contains("tiba") && !stageCorpus.contains("hampir tiba") && !etaEstimate) -> 3
-            stageCorpus.contains("hampir tiba") || stageCorpus.contains("menuju") ||
-                stageCorpus.contains("diantar") || stageCorpus.contains("dalam perjalanan") -> 2
-            stageCorpus.contains("disiapkan") || stageCorpus.contains("menyiapkan") ||
-                stageCorpus.contains("diproses") -> 1
-            else -> null
-        }
+        // Stage driver-resto-tujuan (sumber kebenaran: RemoteViewsExtractor).
+        val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" "))
+        val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
         if (debug) android.util.Log.w(
             "HyperBridgeDebug",
             "DELIVERY-ETA pkg=${sbn.packageName} eta='$eta' stage=${stage ?: "-"}"
@@ -163,20 +152,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val hasProgress = max > 0
         val percent = if (hasProgress) ((current.toFloat() / max.toFloat()) * 100).toInt() else 0
 
-        // Persen garis dari sub-stage (bukan stage/3 kasar): menuju resto masih awal.
-        val lowerAll = stageCorpus
-        val progressPercent = when {
-            stage == null -> null
-            lowerAll.contains("selamat menikmati") || lowerAll.contains("sudah tiba") ||
-                lowerAll.contains("telah tiba") || lowerAll.contains("selesai") -> 100
-            lowerAll.contains("hampir tiba") || lowerAll.contains("menuju lokasi") ||
-                lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") -> 70
-            lowerAll.contains("menuju resto") || lowerAll.contains("menuju ke resto") ||
-                lowerAll.contains("menuju") -> 35
-            lowerAll.contains("disiapkan") || lowerAll.contains("menyiapkan") ||
-                lowerAll.contains("diproses") -> 15
-            else -> (stage * 100) / 3
-        }
+        // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
+        val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
 
         val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", title)
         builder.setEnableFloat(config.isFloat ?: false)
