@@ -126,6 +126,8 @@ object TestNotificationHelper {
             if (!f.exists()) return null
             android.graphics.BitmapFactory.decodeFile(f.absolutePath)
         } catch (_: Exception) { null }
+    }
+
     fun cancelRealClones(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         DeliveryStage.entries.forEach { nm.cancel(REAL_BASE_ID + it.ordinal) }
