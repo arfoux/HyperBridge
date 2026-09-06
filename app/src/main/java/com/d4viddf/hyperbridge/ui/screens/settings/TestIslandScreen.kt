@@ -183,6 +183,39 @@ fun TestIslandScreen(onBack: () -> Unit) {
                         OutlinedButton(onClick = {
                             TestNotificationHelper.cancelRealClones(context)
                         }, modifier = Modifier.fillMaxWidth()) { Text("Cancel semua") }
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            try {
+                                val component = android.content.ComponentName(
+                                    context,
+                                    com.d4viddf.hyperbridge.service.NotificationReaderService::class.java
+                                )
+                                android.service.notification.NotificationListenerService.requestRebind(component)
+                            } catch (_: Exception) {
+                                try {
+                                    val pm = context.packageManager
+                                    val component = android.content.ComponentName(
+                                        context,
+                                        com.d4viddf.hyperbridge.service.NotificationReaderService::class.java
+                                    )
+                                    pm.setComponentEnabledSetting(
+                                        component,
+                                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                        android.content.pm.PackageManager.DONT_KILL_APP
+                                    )
+                                    pm.setComponentEnabledSetting(
+                                        component,
+                                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                        android.content.pm.PackageManager.DONT_KILL_APP
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Rescan sekarang") }
+                        Text(
+                            "Sambung ulang listener + sapu notif aktif yang nangkring (tanpa nunggu event baru).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
