@@ -169,19 +169,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
 
         // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
         val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
-
-        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", title)
-        builder.setEnableFloat(config.isFloat ?: false)
-        builder.setShowNotification(config.isShowShade ?: true)
-        builder.setIslandFirstFloat(config.isFloat ?: false)
-
-        // 3. Pictures: banner persegi untuk cover, logo untuk small island (tetap logo).
-        val logoKey = "${picKey}_logo"
-        builder.addPicture(resolveIcon(sbn, logoKey))
         val banner = try {
-            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBannerBitmap(
+            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBannerBitmapCached(
                 context,
                 sbn.packageName,
+                sbn.key,
                 sbn.notification.contentView,
                 sbn.notification.bigContentView,
                 sbn.notification.headsUpContentView
@@ -268,7 +260,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (stage != null) {
             builder.setStepProgress(stage, 3, themeColor)
             try {
-                val icons = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractNamedIconBitmaps(
+                val icons = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractNamedIconBitmapsCached(
                     context,
                     sbn.packageName,
                     sbn.notification.bigContentView,

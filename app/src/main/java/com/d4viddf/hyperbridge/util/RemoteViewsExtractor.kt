@@ -322,6 +322,87 @@ object RemoteViewsExtractor {
             null
         }
     }
+    // ---------- Cache: ikon/banner stabil per order, inflate+decode cuma sekali ----------
+    // Ikon progress (driver/stage/destination) milik APK pengirim — tidak berubah antar
+    // stage/order; cache per package selama proses hidup (mati ikut proses, update APK ikut ke-reset).
+    // Banner bisa ganti per notif: cache per notifKey + signature murah aksi gambar (reflection-only,
+    // tanpa inflate); kalau signature berubah (gambar promo/stage beda) otomatis re-extract.
+    // Caller tidak me-recycle bitmap (padToSquare selalu bikin kanvas baru), jadi aman dishare.
+    private val namedIconCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+    private val bannerCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Bitmap>>()
+
+    /** Signature murah aksi gambar (tanpa inflate) untuk invalidasi cache banner. */
+    private fun imageActionsSig(vararg views: RemoteViews?): Int {
+        return try {
+            val sb = StringBuilder()
+            for (rv in views) {
+                if (rv == null) continue
+                val field = RemoteViews::class.java.getDeclaredField("mActions")
+                field.isAccessible = true
+                @Suppress("UNCHECKED_CAST")
+                val actions = field.get(rv) as? ArrayList<*> ?: continue
+                for (action in actions) {
+                    if (action == null) continue
+                    val cls = action.javaClass.simpleName ?: "?"
+                    sb.append(cls).append('@')
+                        .append(readActionField(action, "viewId") ?: readActionField(action, "mViewId") ?: 0)
+                        .append(':')
+                    val bmp = readActionField(action, "bitmap") as? Bitmap
+                        ?: readActionField(action, "value") as? Bitmap
+                    if (bmp != null) sb.append(bmp.width).append('x').append(bmp.height).append('#').append(bmp.generationId)
+                    else sb.append(readActionField(action, "value") ?: readActionField(action, "resId") ?: "?")
+                    sb.append(';')
+                }
+            }
+            sb.toString().hashCode()
+        } catch (_: Exception) { 0 }
+    }
+
+    fun extractBannerBitmapCached(
+        appContext: Context,
+        packageName: String,
+        notifKey: String,
+        vararg views: RemoteViews?
+    ): Bitmap? {
+        return try {
+            val sig = imageActionsSig(*views)
+            val cached = bannerCache[notifKey]
+            if (cached != null && cached.first == sig && !cached.second.isRecycled) return cached.second
+            val fresh = extractBannerBitmap(appContext, packageName, *views)
+            if (fresh != null && !fresh.isRecycled) {
+                if (bannerCache.size > 8) bannerCache.clear()
+                bannerCache[notifKey] = sig to fresh
+                fresh
+            } else cached?.second?.takeIf { !it.isRecycled }
+        } catch (_: Exception) {
+            try { extractBannerBitmap(appContext, packageName, *views) } catch (_: Exception) { null }
+        }
+    }
+
+    fun extractNamedIconBitmapsCached(
+        appContext: Context,
+        packageName: String,
+        vararg views: RemoteViews?
+    ): Map<String, Bitmap> {
+        return try {
+            // Hit: nama ikon terikat layout (0x7f0d040f stabil per versi APK) — lewati inflate.
+            val hit = namedIconCache
+                .filterKeys { it.startsWith("$packageName|") }
+                .mapKeys { it.key.substringAfter('|') }
+                .filterValues { !it.isRecycled }
+            if (hit.isNotEmpty()) return hit
+            val fresh = extractNamedIconBitmaps(appContext, packageName, *views)
+            for ((name, bmp) in fresh) {
+                if (!bmp.isRecycled && bmp.width > 0 && bmp.height > 0) {
+                    namedIconCache["$packageName|$name"] = bmp
+                }
+            }
+            if (namedIconCache.size > 60) namedIconCache.clear()
+            fresh
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
 
     // ---------- (1) reflection mActions ----------
 
