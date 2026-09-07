@@ -12,5 +12,8 @@ data class ActiveIsland(
     val subText: String,
     // Used for Deduplication
     val lastContentHash: Int,
-    val deleteIntent: android.app.PendingIntent? = null
+    val deleteIntent: android.app.PendingIntent? = null,
+    // Cheap pre-translate signature (DELIVERY): title/text/RV-texts/image-actions/progress/actions.
+    // Lets burst updates no-op in ms instead of starving behind full RV inflate.
+    val fastHash: Int = 0
 )

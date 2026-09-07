@@ -753,6 +753,28 @@ class NotificationReaderService : NotificationListenerService() {
             } else {
                 detectNotificationType(sbn)
             }
+            // FAST-PATH dedup (DELIVERY custom-engine): burst update Shopee (posisi driver/ETA tick)
+            // tiap post cancel job sebelumnya + translate full (inflate RV x3 + bitmap) itu berat.
+            // Kalau signature murah identik, no-op dalam ms — update yang beneran berubah tetap full translate.
+            // Native live-update path murah (tanpa inflate) jadi tidak perlu fast-path.
+            var deliveryFastHash = 0
+            if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
+                deliveryFastHash = try {
+                    val ex = com.d4viddf.hyperbridge.util.RemoteViewsExtractor
+                    val rvTexts = (ex.extractTexts(sbn.notification.contentView, false) +
+                        ex.extractTexts(sbn.notification.bigContentView, false)).joinToString("|")
+                    var h = effectiveTitle.hashCode() * 31 + effectiveText.hashCode()
+                    h = h * 31 + (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.hashCode() ?: 0)
+                    h = h * 31 + (extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.hashCode() ?: 0)
+                    h = h * 31 + rvTexts.hashCode()
+                    h = h * 31 + extras.getInt(Notification.EXTRA_PROGRESS, 0) + extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+                    h = h * 31 + (sbn.notification.actions?.joinToString { it.title?.toString() ?: "" }?.hashCode() ?: 0)
+                    h
+                } catch (_: Exception) { 0 }
+                if (deliveryFastHash != 0 && previous != null && previous.type == NotificationType.DELIVERY &&
+                    previous.fastHash == deliveryFastHash
+                ) return
+            }
 
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
             val isTestNotif = extras.getBoolean("hyperbridge_test", false)
@@ -943,7 +965,8 @@ class NotificationReaderService : NotificationListenerService() {
                 activeIslands[effectiveKey] = ActiveIsland(
                     id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                     packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
-                    subText = "LiveUpdate", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent
+                    subText = "LiveUpdate", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                    fastHash = deliveryFastHash
                 )
                 updatePermanentIsland()
 
@@ -995,7 +1018,8 @@ class NotificationReaderService : NotificationListenerService() {
             activeIslands[effectiveKey] = ActiveIsland(
                 id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                 packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
-                subText = "", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent
+                subText = "", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                fastHash = deliveryFastHash
             )
             updatePermanentIsland()
 
