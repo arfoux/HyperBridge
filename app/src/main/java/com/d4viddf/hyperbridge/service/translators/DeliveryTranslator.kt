@@ -144,7 +144,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val eta = etaRegex.find(rvAll.joinToString(" • "))?.value
             ?: etaRegex.find(text)?.value
             ?: etaRegex.find(title)?.value
-            ?: text.ifEmpty { title }
+            ?: ""
         // Stage driver-resto-tujuan (sumber kebenaran: RemoteViewsExtractor).
         val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" "))
         val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)

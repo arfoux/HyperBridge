@@ -268,13 +268,15 @@ object RemoteViewsExtractor {
         all.addAll(extractTexts(remoteViews, debugLogging))
         all.addAll(extractTexts(bigRemoteViews, debugLogging))
         if (all.isEmpty()) return null to null
-        // Shopee custom view biasanya: [0]=title, [1]=content, [2]=extra
-        // Fallback: ambil 2 string terpanjang / paling relevan yang tidak mengandung promo generic
+        // Shopee custom view biasanya: [0]=title (header status), [1]=content, [2]=extra.
+        // Title WAJIB ambil urutan pertama — min-length malah nyomot label timeline
+        // ("Driver sedang menuju resto") padahal header-nya ("Resto sedang menyiapkan pesananmu").
         val filtered = all.filterNot { it.equals("null", true) }
         if (filtered.isEmpty()) return null to null
-        // Title = shortest distinct that looks like header, Text = longest
-        val title = filtered.minByOrNull { it.length }?.takeIf { it.length >= 3 }
-        val text = filtered.maxByOrNull { it.length }?.takeIf { it.length >= 4 }
+        // Title = elemen pertama (header), Text = string terpanjang yang beda dari title
+        val title = filtered.firstOrNull()?.takeIf { it.length >= 3 }
+        val text = filtered.filterNot { it == title }.maxByOrNull { it.length }?.takeIf { it.length >= 4 }
+            ?: filtered.getOrNull(1)
         // jika title == text, split
         return if (title == text && filtered.size >= 2) {
             filtered[0] to filtered[1]
