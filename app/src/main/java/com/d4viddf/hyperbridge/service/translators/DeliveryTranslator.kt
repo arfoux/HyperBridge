@@ -2,8 +2,6 @@ package com.d4viddf.hyperbridge.service.translators
 
 import android.app.Notification
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.service.notification.StatusBarNotification
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
@@ -21,22 +19,6 @@ import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
 
-    /**
-     * Ganjal bitmap ke kanvas persegi transparan (tengah) agar slot pill yang
-     * kotak tidak menarik (stretch) gambar — rasio asli aman.
-     */
-    private fun padToSquare(src: Bitmap): Bitmap {
-        return try {
-            if (src.isRecycled || src.width <= 0 || src.height <= 0) return src
-            if (src.width == src.height) return src
-            val size = maxOf(src.width, src.height)
-            val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(out)
-            canvas.drawBitmap(src, ((size - src.width) / 2f), ((size - src.height) / 2f), null)
-            out
-        } catch (_: Exception) { src }
-    }
-    private val preferences = AppPreferences(context)
 
     fun translate(
         sbn: StatusBarNotification,
@@ -68,46 +50,16 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 "tpl='${extras.getString(Notification.EXTRA_TEMPLATE)}' custom=${extras.getBoolean("android.contains.customView")} " +
                 "keys=${extras.keySet().joinToString()}"
         )
-        // RV-FULL: kumpulkan SEMUA teks RemoteViews sekali, pakai ulang di bawah
         val debug = preferences.debugLoggingSync()
-        val rvAll = (
-            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView, debug) +
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView, debug) +
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.headsUpContentView, debug)
-            ).distinct()
-        // [DEBUG] RV-FULL berisi semua teks RemoteViews agar 100% data expand terbaca
-        if (debug) android.util.Log.w(
-            "HyperBridgeDebug",
-            "DELIVERY-RV-FULL pkg=${sbn.packageName} n=${rvAll.size} " +
-                "texts=[${rvAll.joinToString(" | ")}]"
-        )
-        // [DEBUG] meta notif (flags/category/group/timeout/actions) — pemetaan menyusul
-        if (debug) android.util.Log.w(
-            "HyperBridgeDebug",
-            "DELIVERY-RV-META pkg=${sbn.packageName} " +
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpNotificationMeta(sbn)
-        )
-        // [DEBUG] dump total hierarki + aksi (di-chunk): pemetaan menyusul setelah data ada
-        if (debug) com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpRemoteViewsFull(
-            context,
-            sbn.packageName,
-            sbn.packageName,
-            sbn.notification.contentView,
-            sbn.notification.bigContentView,
-            sbn.notification.headsUpContentView
-        )
-        // Fallback eligible: title -> bigTitle -> RemoteViews -> appLabel -> type_delivery
+        // 100% EXTRAS: tidak ada baca contentView/RemoteViews di jalur produksi.
+        // Terbukti live: title+text extras selalu ada per stage; ETA/resto/banner hanya di RV
+        // dan sengaja tidak dipakai demi kecepatan + nol inflate.
+        // Fallback extras-only: title -> bigTitle -> type_delivery (tanpa RemoteViews)
         var title = effectiveTitle.ifEmpty {
             extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim() ?: ""
         }
         if (title.isEmpty()) {
             title = extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()?.replace("\n", " ")?.trim() ?: ""
-        }
-        if (title.isEmpty()) {
-            try {
-                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, debug)
-                if (!rvTitle.isNullOrEmpty()) title = rvTitle
-            } catch (_: Exception) {}
         }
         if (title.isEmpty()) {
             title = context.getString(R.string.type_delivery)
@@ -124,23 +76,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (text.isEmpty()) {
             text = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
         }
-        if (text.isEmpty()) {
-            try {
-                val (_, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, debug)
-                if (!rvText.isNullOrEmpty()) text = rvText
-                // jika masih kosong, ambil semua texts dari RemoteViews gabung
-                if (text.isEmpty()) {
-                    val distinct = rvAll.filterNot { it == title }
-                    if (distinct.isNotEmpty()) text = distinct.joinToString(" • ").take(180)
-                }
-            } catch (_: Exception) {}
-        }
-        // ETA kanan: regex dari teks RemoteViews dulu, fallback teks biasa.
-        // Format waktu Indonesia pakai titik: 14.08 - 14.18
-        // Korpus RV digabung pakai SPASI (bukan " • "): "Tiba pada" dan "11:32" sering
-        // beda TextView, separator " • " memutus pola "tiba pada\s+\d". Dari semua
-        // kandidat, utamakan yang mengandung huruf ("Tiba pada 11:32", "32 menit")
-        // di atas jam telanjang ("11:32").
+        // ETA kanan: regex dari teks extras saja (teks utuh, tanpa join antar-TextView).
+        // Utamakan match berhuruf ("Tiba pada 11:32", "32 menit") di atas jam telanjang.
+        // Catatan: ETA yang cuma ada di RemoteViews ("Tiba pada ..." Shopee) memang tidak
+        // ditampilkan — harga 100% extras. Kanan kosong (""), bukan teks ngaco.
         val etaRegex = Regex(
             "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
             RegexOption.IGNORE_CASE
@@ -149,19 +88,16 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             val all = etaRegex.findAll(s).map { it.value }.toList()
             return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
         }
-        val rvSpace = rvAll.joinToString(" ")
-        val eta = pickEta(rvSpace)
-            ?: pickEta(text)
+        val eta = pickEta(text)
             ?: pickEta(title)
             ?: ""
-        // Stage driver-resto-tujuan (sumber kebenaran: RemoteViewsExtractor).
-        val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" "))
+        // Stage driver-resto-tujuan dari title+text extras (sumber kebenaran: RemoteViewsExtractor).
+        val stageCorpus = "$title $text"
         val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
         if (debug) android.util.Log.w(
             "HyperBridgeDebug",
-            "DELIVERY-ETA pkg=${sbn.packageName} eta='$eta' stage=${stage ?: "-"}"
+            "DELIVERY-ETA pkg=${sbn.packageName} eta='$eta' stage=${stage ?: "-"} title='$title' text='$text'"
         )
-
         val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
         val current = extras.getInt(Notification.EXTRA_PROGRESS, 0)
         val hasProgress = max > 0
@@ -169,40 +105,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
 
         // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
         val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
-        val banner = try {
-            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBannerBitmapCached(
-                context,
-                sbn.packageName,
-                sbn.key,
-                sbn.notification.contentView,
-                sbn.notification.bigContentView,
-                sbn.notification.headsUpContentView
-            )
-        } catch (_: Exception) { null }
-        if (debug) android.util.Log.w(
-            "HyperBridgeDebug",
-            "DELIVERY-BANNER pkg=${sbn.packageName} " +
-                (if (banner != null) "found=${banner.width}x${banner.height}" else "null->logo")
-        )
-        if (debug) android.util.Log.w(
-            "HyperBridgeDebug",
-            "DELIVERY-BANNER-ACTIONS pkg=${sbn.packageName} " +
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.dumpImageActions(
-                    context,
-                    sbn.packageName,
-                    sbn.notification.contentView,
-                    sbn.notification.bigContentView,
-                    sbn.notification.headsUpContentView
-                )
-        )
-        // coverKey = banner live bila ada; untuk REAL-clone test boleh pakai banner
-        // sideload (test-only, bukan dari notif); else logo.
-        // (aset Shopee tidak dibundle repo — file hanya di HP via adb push)
+        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", title)
+        builder.setEnableFloat(config.isFloat ?: false)
+        builder.setShowNotification(config.isShowShade ?: true)
+        builder.setIslandFirstFloat(config.isFloat ?: false)
+
+        // 3. Pictures: logo ShopeeFood hardcode (drawable hasil dump order asli, stabil
+        // antar order) untuk small island + cover. Nol ekstrak RemoteViews.
+        val logoKey = "${picKey}_logo"
+        builder.addPicture(getDrawablePicture(logoKey, R.drawable.delivery_logo_food))
         val isRealClonePost = extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
-        val coverKey = if (banner != null) {
-            builder.addPicture(HyperPicture(picKey, banner))
-            picKey
-        } else if (isRealClonePost) {
+        val coverKey = if (isRealClonePost) {
             val testBanner = try {
                 com.d4viddf.hyperbridge.util.TestNotificationHelper.loadTestBanner(context)
             } catch (_: Exception) { null }
@@ -212,18 +125,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             } else logoKey
         } else {
             logoKey
-        }
-        // [DEBUG] simpan bitmap asli ke filesDir untuk ditarik via adb (100% data)
-        if (debug && banner != null) {
-            try {
-                val saved = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.saveBitmaps(
-                    context, sbn.key.hashCode().toString(), mapOf("banner" to banner)
-                )
-                if (saved.isNotEmpty()) android.util.Log.w(
-                    "HyperBridgeDebug",
-                    "DELIVERY-SAVE pkg=${sbn.packageName} files=[${saved.joinToString(" | ")}]"
-                )
-            } catch (_: Exception) {}
         }
         builder.addPicture(getTransparentPicture("hidden_pixel"))
 
@@ -259,46 +160,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Percent dari stage: 1->33, 2->66, 3->100 (penuh seperti ori saat tiba).
         if (stage != null) {
             builder.setStepProgress(stage, 3, themeColor)
-            try {
-                val icons = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractNamedIconBitmapsCached(
-                    context,
-                    sbn.packageName,
-                    sbn.notification.bigContentView,
-                    sbn.notification.contentView
-                )
-                fun iconKey(match: String): String? {
-                    val e = icons.entries.find { it.key.contains(match, ignoreCase = true) }
-                    if (e == null) return null
-                    val k = "delivery_prog_$match"
-                    builder.addPicture(HyperPicture(k, padToSquare(e.value)))
-                    return k
-                }
-                val fwd = iconKey("driver")
-                val mid = iconKey("stage")
-                val end = iconKey("destination")
-                if (debug) android.util.Log.w(
-                    "HyperBridgeDebug",
-                    "DELIVERY-PROGRESS pkg=${sbn.packageName} stage=$stage fwd=$fwd mid=$mid end=$end"
-                )
-                if (debug) {
-                    try {
-                        val saved = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.saveBitmaps(
-                            context, sbn.key.hashCode().toString(), icons
-                        )
-                        if (saved.isNotEmpty()) android.util.Log.w(
-                            "HyperBridgeDebug",
-                            "DELIVERY-SAVE pkg=${sbn.packageName} files=[${saved.joinToString(" | ")}]"
-                        )
-                    } catch (_: Exception) {}
-                }
-                builder.setProgressBar(
-                    progress = progressPercent ?: ((stage * 100) / 3),
-                    color = themeColor,
-                    picForwardKey = fwd,
-                    picMiddleKey = mid,
-                    picEndKey = end ?: "hidden_pixel"
-                )
-            } catch (_: Exception) {}
+            // Ikon garis hardcode (drawable hasil dump, stabil antar order) — nol inflate.
+            builder.addPicture(getDrawablePicture("delivery_prog_driver", R.drawable.delivery_icon_driver))
+            builder.addPicture(getDrawablePicture("delivery_prog_stage", R.drawable.delivery_icon_stage))
+            builder.addPicture(getDrawablePicture("delivery_prog_destination", R.drawable.delivery_icon_pin))
+            builder.setProgressBar(
+                progress = progressPercent ?: ((stage * 100) / 3),
+                color = themeColor,
+                picForwardKey = "delivery_prog_driver",
+                picMiddleKey = "delivery_prog_stage",
+                picEndKey = "delivery_prog_destination"
+            )
         } else if (hasProgress) {
             builder.setProgressBar(
                 progress = percent,

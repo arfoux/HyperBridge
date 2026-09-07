@@ -753,20 +753,15 @@ class NotificationReaderService : NotificationListenerService() {
             } else {
                 detectNotificationType(sbn)
             }
-            // FAST-PATH dedup (DELIVERY custom-engine): burst update Shopee (posisi driver/ETA tick)
-            // tiap post cancel job sebelumnya + translate full (inflate RV x3 + bitmap) itu berat.
-            // Kalau signature murah identik, no-op dalam ms — update yang beneran berubah tetap full translate.
+            // FAST-PATH dedup (DELIVERY custom-engine): 100% extras, tanpa sentuh contentView.
+            // Burst update Shopee no-op dalam ms; yang berubah stage/teks/actions tetap full translate.
             // Native live-update path murah (tanpa inflate) jadi tidak perlu fast-path.
             var deliveryFastHash = 0
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
                 deliveryFastHash = try {
-                    val ex = com.d4viddf.hyperbridge.util.RemoteViewsExtractor
-                    val rvTexts = (ex.extractTexts(sbn.notification.contentView, false) +
-                        ex.extractTexts(sbn.notification.bigContentView, false)).joinToString("|")
                     var h = effectiveTitle.hashCode() * 31 + effectiveText.hashCode()
                     h = h * 31 + (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.hashCode() ?: 0)
                     h = h * 31 + (extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.hashCode() ?: 0)
-                    h = h * 31 + rvTexts.hashCode()
                     h = h * 31 + extras.getInt(Notification.EXTRA_PROGRESS, 0) + extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
                     h = h * 31 + (sbn.notification.actions?.joinToString { it.title?.toString() ?: "" }?.hashCode() ?: 0)
                     h
@@ -775,7 +770,6 @@ class NotificationReaderService : NotificationListenerService() {
                     previous.fastHash == deliveryFastHash
                 ) return
             }
-
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
             val isTestNotif = extras.getBoolean("hyperbridge_test", false)
             if (isTestNotif) {
@@ -991,15 +985,8 @@ class NotificationReaderService : NotificationListenerService() {
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
 
-            val newContentHash = data.jsonParam.hashCode() + if (type == NotificationType.DELIVERY) {
-                // Update DELIVERY yang title/text-nya identik tapi isi RemoteViews berubah
-                // (posisi driver, ETA, ikon) harus tetap repost — campur signature RV ke hash.
-                try {
-                    (com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.contentView, false) +
-                        com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(sbn.notification.bigContentView, false))
-                        .joinToString("|").hashCode()
-                } catch (_: Exception) { 0 }
-            } else 0
+            // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
+            val newContentHash = data.jsonParam.hashCode()
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
 
             kotlinx.coroutines.yield()

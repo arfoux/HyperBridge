@@ -412,6 +412,12 @@ abstract class BaseTranslator(
         val bitmap = drawable?.toBitmap() ?: createFallbackBitmap()
         return HyperPicture(key, bitmap)
     }
+    /** Gambar drawable apa adanya (tanpa tint) untuk aset hardcode seperti logo delivery. */
+    protected fun getDrawablePicture(key: String, resId: Int): HyperPicture {
+        val drawable = ContextCompat.getDrawable(context, resId)
+        val bitmap = drawable?.toBitmap() ?: createFallbackBitmap()
+        return HyperPicture(key, bitmap)
+    }
 
     protected fun getNotificationBitmap(sbn: StatusBarNotification): Bitmap? {
         val pkg = sbn.packageName
