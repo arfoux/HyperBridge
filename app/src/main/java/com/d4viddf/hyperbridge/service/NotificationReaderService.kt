@@ -686,22 +686,9 @@ class NotificationReaderService : NotificationListenerService() {
         try {
             val extras = sbn.notification.extras
 
-            // [LOGIC] 1. Resolve Info intelligently — fallback chain: extras > bigText/subText > RemoteViews
+            // [LOGIC] 1. Resolve Info 100% extras — tanpa baca contentView/RemoteViews.
             var effectiveTitle = resolveTitle(sbn)
             var effectiveText = resolveText(sbn.notification.extras)
-            // Fallback RemoteViews jika title/text kosong (Shopee DecoratedCustomViewStyle)
-            if ((effectiveTitle.isEmpty() || effectiveText.isEmpty()) && sbn.notification.contentView != null) {
-                try {
-                    val (rvTitle, rvText) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(
-                        sbn.notification.contentView, sbn.notification.bigContentView, debugLogEnabled()
-                    )
-                    if (effectiveTitle.isEmpty() && !rvTitle.isNullOrEmpty()) effectiveTitle = rvTitle
-                    if (effectiveText.isEmpty() && !rvText.isNullOrEmpty()) effectiveText = rvText
-                    // jika hanya satu yang terisi, gunakan juga sebagai fallback silang
-                    if (effectiveTitle.isEmpty() && !rvText.isNullOrEmpty()) effectiveTitle = rvText
-                    if (effectiveText.isEmpty() && !rvTitle.isNullOrEmpty()) effectiveText = rvTitle
-                } catch (_: Exception) {}
-            }
             // Fallback tambahan: bigText/subText/infoText
             if (effectiveText.isEmpty()) {
                 val big = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
@@ -1094,13 +1081,7 @@ class NotificationReaderService : NotificationListenerService() {
             return bigTitle
         }
         if (!title.isNullOrEmpty() && !title.equals(pkg, ignoreCase = true)) return title
-        // Fallback: RemoteViews eligible (Shopee custom)
-        if (title.isEmpty() || title.equals(pkg, ignoreCase = true)) {
-            try {
-                val (rvTitle, _) = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractBestTitleText(sbn.notification.contentView, sbn.notification.bigContentView, debugLogEnabled())
-                if (!rvTitle.isNullOrEmpty()) return rvTitle
-            } catch (_: Exception) {}
-        }
+        // Tanpa fallback RemoteViews (jalur 100% extras).
         if (title.equals(pkg, ignoreCase = true)) return ""
         return title
     }
@@ -1168,17 +1149,8 @@ class NotificationReaderService : NotificationListenerService() {
         val rawText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         val rawBig = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
         val rawSub = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
-        // RemoteViews fallback: jika extras kosong, coba parse custom view
-        val rvTexts = if (rawTitle.isBlank() && rawText.isBlank()) {
-            try {
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.contentView, debugLogEnabled()) +
-                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(n.bigContentView, debugLogEnabled())
-            } catch (_: Exception) { emptyList() }
-        } else emptyList()
-        val combined = buildString {
-            append(rawTitle); append(' '); append(rawText); append(' '); append(rawBig); append(' '); append(rawSub)
-            if (rvTexts.isNotEmpty()) { append(' '); append(rvTexts.joinToString(" ")) }
-        }.lowercase()
+        // Tanpa fallback RemoteViews (jalur 100% extras).
+        val combined = "$rawTitle $rawText $rawBig $rawSub".lowercase()
         val hasFoodKeyword = combined.contains("driver") || combined.contains("resto") || combined.contains("pesanan") ||
             combined.contains("makanan") || combined.contains("momoyo") || combined.contains("sedang menuju") ||
             combined.contains("sedang disiapkan") || combined.contains("diantar") || combined.contains("mencari driver")
@@ -1199,9 +1171,8 @@ class NotificationReaderService : NotificationListenerService() {
 
         // [DEBUG] Log delivery candidates so we can confirm the real package/type on-device (Log.w biar tidak di-strip proguard)
         if (sbn.packageName.contains("shopee") || sbn.packageName.contains("gojek") || sbn.packageName.contains("grab") || isProgressStyle || isLiveActivity || isShopeeFoodEligible) {
-            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo rv=${rvTexts.take(2)} keys=${extras.keySet().joinToString()}")
+            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-DEBUG pkg=${sbn.packageName} ch=$channelId cat=${n.category} tpl=$template title='$title' text='$text' big='$rawBig' progress=$hasProgress live=$isLiveActivity eligible=$isShopeeFoodEligible promo=$isPromo keys=${extras.keySet().joinToString()}")
         }
-
         return when {
             isCall -> NotificationType.CALL
             isNav -> NotificationType.NAVIGATION
@@ -1421,12 +1392,8 @@ class NotificationReaderService : NotificationListenerService() {
         val isSpecial = notification.category == Notification.CATEGORY_TRANSPORT || notification.category == Notification.CATEGORY_CALL ||
                 notification.category == Notification.CATEGORY_NAVIGATION || extras.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true
         if (hasProgress || isSpecial) return false
+        // Kosong = junk, tanpa intip RemoteViews (jalur 100% extras).
         if (title.isEmpty() && text.isEmpty()) {
-            // Cek RemoteViews eligible sebelum dianggap junk
-            try {
-                val rv = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractTexts(notification.contentView, debugLogEnabled())
-                if (rv.isNotEmpty()) return false
-            } catch (_: Exception) {}
             return true
         }
         if (title.equals(pkg, ignoreCase = true) || text.equals(pkg, ignoreCase = true)) return true
