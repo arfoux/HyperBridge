@@ -137,13 +137,22 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
         // ETA kanan: regex dari teks RemoteViews dulu, fallback teks biasa.
         // Format waktu Indonesia pakai titik: 14.08 - 14.18
+        // Korpus RV digabung pakai SPASI (bukan " • "): "Tiba pada" dan "11:32" sering
+        // beda TextView, separator " • " memutus pola "tiba pada\s+\d". Dari semua
+        // kandidat, utamakan yang mengandung huruf ("Tiba pada 11:32", "32 menit")
+        // di atas jam telanjang ("11:32").
         val etaRegex = Regex(
             "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
             RegexOption.IGNORE_CASE
         )
-        val eta = etaRegex.find(rvAll.joinToString(" • "))?.value
-            ?: etaRegex.find(text)?.value
-            ?: etaRegex.find(title)?.value
+        fun pickEta(s: String): String? {
+            val all = etaRegex.findAll(s).map { it.value }.toList()
+            return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
+        }
+        val rvSpace = rvAll.joinToString(" ")
+        val eta = pickEta(rvSpace)
+            ?: pickEta(text)
+            ?: pickEta(title)
             ?: ""
         // Stage driver-resto-tujuan (sumber kebenaran: RemoteViewsExtractor).
         val stageCorpus = (title + " " + text + " " + rvAll.joinToString(" "))
