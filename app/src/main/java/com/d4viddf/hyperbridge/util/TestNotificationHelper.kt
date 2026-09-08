@@ -38,27 +38,27 @@ object TestNotificationHelper {
     private const val TEST_CHANNEL_ID = "hyperbridge_test_channel"
     private const val TEST_BASE_ID = 90000
 
-    /** 4 observable ShopeeFood stages, text cloned 1:1 from real notifs (see DELIVERY_VERIFY pattern). */
+    /** 4 stage asli dari riwayat order shopee_food_orders_3252064997935104326 (+3250386039819264326), 1:1 dari DB. */
     enum class DeliveryStage(val title: String, val text: String, val liveId: String) {
         DISIAPKAN(
-            "Resto sedang menyiapkan pesananmu",
-            "DKRIUK KS TUBUN \u2022 Estimasi tiba dalam 32 menit",
-            "shopee_food_orders_disiapkan"
+            "15:34 - 15:44",
+            "Kami sudah menerima pesananmu",
+            "shopee_food_orders_3252064997935104326"
         ),
         MENUJU(
             "Driver sedang menuju Resto",
-            "Driver sedang menuju ke Resto \u2022 Tiba pada 19:20",
-            "shopee_food_orders_menuju"
+            "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang",
+            "shopee_food_orders_3252064997935104326"
         ),
         TIBA(
-            "Pesananmu sudah tiba!",
-            "Terima kasih sudah memesan \u2022 Selamat menikmati!",
-            "shopee_food_orders_tiba"
+            "Pesananmu sedang dalam perjalanan!",
+            "Driver sedang menuju lokasimu. Siap-siap ambil pesananmu, ya!",
+            "shopee_food_orders_3252064997935104326"
         ),
         SELESAI(
             "Selamat menikmati!",
-            "Jangan lupa beri nilai untuk pesananmu",
-            "shopee_food_orders_selesai"
+            "Pastikan pesananmu sudah sesuai. Jika menemukan masalah beritahu kami secepatnya, ya \uD83E\uDDE1",
+            "shopee_food_orders_3252064997935104326"
         );
     }
 
