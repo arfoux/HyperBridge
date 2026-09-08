@@ -19,7 +19,7 @@ import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
 
-
+    private val preferences = AppPreferences(context)
     fun translate(
         sbn: StatusBarNotification,
         effectiveTitle: String,
