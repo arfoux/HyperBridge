@@ -51,48 +51,77 @@ object RemoteViewsExtractor {
     //  agar pill tetap instan (0ms block). Reflection mActions = 1-3ms.
     // ========================================================================
 
-    /** Ambil semua teks dari RemoteViews via reflection mActions (tanpa inflate). */
+    /** Ambil semua teks dari RemoteViews — coba reflection, fallback inflate (async, tetap 0ms pill). */
     fun extractRemoteViewsCorpus(sbn: StatusBarNotification): String? {
+        return extractRemoteViewsCorpusInternal(sbn, null)
+    }
+
+    fun extractRemoteViewsCorpusWithContext(context: android.content.Context, sbn: StatusBarNotification): String? {
+        return extractRemoteViewsCorpusInternal(sbn, context)
+    }
+
+    private fun extractRemoteViewsCorpusInternal(sbn: StatusBarNotification, context: android.content.Context?): String? {
         return try {
             val n = sbn.notification
-            // Utamakan bigContentView (Shopee delivery pakai DecoratedCustomViewStyle + bigContentView)
             val candidates = listOfNotNull(n.bigContentView, n.contentView, n.headsUpContentView)
-            if (candidates.isEmpty()) return null
+            if (candidates.isEmpty()) {
+                android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT no RemoteViews for ${sbn.key}")
+                return null
+            }
             val sb = StringBuilder()
             for (rv in candidates) {
-                val t = extractTextFromRemoteViews(rv) ?: continue
-                if (t.isNotBlank()) {
+                var t: String? = null
+                // 1. reflection mActions (cepat)
+                t = extractTextFromRemoteViews(rv)
+                if (t.isNullOrBlank() && context != null) {
+                    // 2. fallback inflate — butuh context, dijalankan async setelah pill
+                    t = extractTextViaInflate(context, rv)
+                }
+                if (!t.isNullOrBlank()) {
                     if (sb.isNotEmpty()) sb.append(" ")
                     sb.append(t)
                 }
             }
             val out = sb.toString().replace(Regex("\\s+"), " ").trim()
-            if (out.isEmpty()) null else out.take(1200)
-        } catch (_: Exception) { null }
+            if (out.isEmpty()) {
+                android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT empty corpus key=${sbn.key} rvCount=${candidates.size}")
+                null
+            } else out.take(2000)
+        } catch (e: Exception) {
+            android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT exception ${e.message}")
+            null
+        }
     }
 
     private fun extractTextFromRemoteViews(rv: RemoteViews): String? {
         return try {
-            val actionsField = RemoteViews::class.java.getDeclaredField("mActions")
+            // Hidden API di Android 13+ bisa block getDeclaredField — log biar tau
+            val actionsField = try {
+                RemoteViews::class.java.getDeclaredField("mActions")
+            } catch (e: Exception) {
+                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT no mActions field ${e.message}")
+                return null
+            }
             actionsField.isAccessible = true
             @Suppress("UNCHECKED_CAST")
-            val actions = actionsField.get(rv) as? ArrayList<*> ?: return null
+            val actions = actionsField.get(rv) as? ArrayList<*> ?: run {
+                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT mActions null/empty")
+                return null
+            }
+            if (actions.isEmpty()) {
+                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT actions empty")
+                return null
+            }
             val sb = StringBuilder()
             for (action in actions) {
                 if (action == null) continue
                 try {
                     val clazz = action.javaClass
-                    // Cari methodName field (di ReflectionAction)
-                    val methodNameField = runCatching {
-                        clazz.getDeclaredField("methodName")
-                    }.getOrNull() ?: runCatching {
-                        clazz.superclass?.getDeclaredField("methodName")
-                    }.getOrNull() ?: continue
+                    val methodNameField = runCatching { clazz.getDeclaredField("methodName") }.getOrNull()
+                        ?: runCatching { clazz.superclass?.getDeclaredField("methodName") }.getOrNull() ?: continue
                     methodNameField.isAccessible = true
                     val methodName = methodNameField.get(action) as? String ?: continue
-                    if (methodName != "setText" && methodName != "setTextViewText") continue
-
-                    // Ambil CharSequence value — field name bervariasi per Android version
+                    if (methodName != "setText" && methodName != "setTextViewText" && methodName != "setChronometer" && !methodName.contains("Text", true)) continue
                     var value: CharSequence? = null
                     val candidateFields = mutableListOf<java.lang.reflect.Field>()
                     candidateFields.addAll(clazz.declaredFields.toList())
@@ -104,8 +133,9 @@ object RemoteViewsExtractor {
                         val v = f.get(action) as? CharSequence ?: continue
                         val s = v.toString().trim()
                         if (s.isEmpty() || s.length > 300) continue
-                        // Hindari ambil methodName itu sendiri (“setText”)
                         if (s == methodName) continue
+                        // filter package name yang keikut (jarang)
+                        if (s.matches(Regex("[a-z]+\\.[a-z.]+"))) continue
                         value = v
                         break
                     }
@@ -119,8 +149,52 @@ object RemoteViewsExtractor {
                 } catch (_: Exception) { continue }
             }
             val res = sb.toString().trim()
-            if (res.isEmpty()) null else res
-        } catch (_: Exception) { null }
+            if (res.isEmpty()) {
+                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT corpus empty actions=${actions.size}")
+                null
+            } else res
+        } catch (e: Exception) {
+            android.util.Log.w("HyperBridgeDebug", "RV-REFLECT exception ${e.message}")
+            null
+        }
+    }
+
+    private fun extractTextViaInflate(context: android.content.Context, rv: RemoteViews): String? {
+        return try {
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            // Inflate butuh parent — FrameLayout dummy. Harus di main thread untuk layout? coba langsung, fallback ke Handler jika fail.
+            val parent = android.widget.FrameLayout(context)
+            val view = try {
+                rv.apply(context, parent)
+            } catch (e: Exception) {
+                android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
+                return null
+            }
+            val sb = StringBuilder()
+            fun traverse(v: android.view.View) {
+                try {
+                    if (v is android.widget.TextView) {
+                        val t = v.text?.toString()?.trim()
+                        if (!t.isNullOrEmpty() && t.length < 500) {
+                            if (sb.isNotEmpty()) sb.append(" ")
+                            sb.append(t.replace("\n", " ").trim())
+                        }
+                    } else if (v is android.view.ViewGroup) {
+                        for (i in 0 until v.childCount) traverse(v.getChildAt(i))
+                    }
+                } catch (_: Exception) {}
+            }
+            traverse(view)
+            // Bersihkan view agar tidak leak
+            try { (view.parent as? android.view.ViewGroup)?.removeView(view) } catch (_: Exception) {}
+            val dt = android.os.SystemClock.elapsedRealtime() - t0
+            val out = sb.toString().replace(Regex("\\s+"), " ").trim()
+            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE ok dt=${dt}ms corpus='${out.take(180)}'")
+            if (out.isEmpty()) null else out
+        } catch (e: Exception) {
+            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE exception ${e.message}")
+            null
+        }
     }
 
     /** Regex ETA yang sama dengan DeliveryTranslator — dipakai untuk RV corpus. */

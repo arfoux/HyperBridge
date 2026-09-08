@@ -1018,7 +1018,14 @@ class NotificationReaderService : NotificationListenerService() {
                         try {
                             // Kecil delay biar pill settle, tapi tetap cepat (50ms)
                             kotlinx.coroutines.delay(80)
-                            val rvCorpus = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
+                            // Coba reflection dulu (tanpa context), fallback inflate dengan context (butuh view hierarchy)
+                            var rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
+                            if (rvCorpus.isNullOrBlank()) {
+                                // Inflate butuh Context + main thread — pindah ke Main, fallback tetap async
+                                rvCorpus = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(this@NotificationReaderService, capturedSbn)
+                                }
+                            }
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
                             if (!rvEta.isNullOrBlank()) {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")
