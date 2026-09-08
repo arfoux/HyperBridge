@@ -2,7 +2,10 @@ package com.d4viddf.hyperbridge.service.translators
 
 import android.app.Notification
 import android.content.Context
+import android.graphics.Bitmap
 import android.service.notification.StatusBarNotification
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.d4viddf.hyperbridge.R
 import com.d4viddf.hyperbridge.data.AppPreferences
 import com.d4viddf.hyperbridge.data.theme.ThemeRepository
@@ -18,6 +21,22 @@ import io.github.d4viddf.hyperisland_kit.models.PicInfo
 import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
+
+    /** Center-crop square agar aset wide (logo/marker) tidak lonjong di slot lingkaran. */
+    private fun squarePicture(key: String, resId: Int): HyperPicture {
+        return try {
+            val drawable = ContextCompat.getDrawable(context, resId)
+                ?: return getDrawablePicture(key, resId)
+            var bitmap = drawable.toBitmap()
+            if (bitmap.width != bitmap.height) {
+                val s = minOf(bitmap.width, bitmap.height)
+                bitmap = Bitmap.createBitmap(bitmap, (bitmap.width - s) / 2, (bitmap.height - s) / 2, s, s)
+            }
+            HyperPicture(key, bitmap)
+        } catch (_: Exception) {
+            getDrawablePicture(key, resId)
+        }
+    }
 
     private val preferences = AppPreferences(context)
     fun translate(
@@ -113,7 +132,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 3. Pictures: logo ShopeeFood hardcode (drawable hasil dump order asli, stabil
         // antar order) untuk small island + cover. Nol ekstrak RemoteViews.
         val logoKey = "${picKey}_logo"
-        builder.addPicture(getDrawablePicture(logoKey, R.drawable.delivery_logo_food))
+        builder.addPicture(squarePicture(logoKey, R.drawable.delivery_logo_food))
         val isRealClonePost = extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
         val coverKey = if (isRealClonePost) {
             val testBanner = try {
@@ -161,9 +180,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (stage != null) {
             builder.setStepProgress(stage, 3, themeColor)
             // Ikon garis hardcode (drawable hasil dump, stabil antar order) — nol inflate.
-            builder.addPicture(getDrawablePicture("delivery_prog_driver", R.drawable.delivery_icon_driver))
-            builder.addPicture(getDrawablePicture("delivery_prog_stage", R.drawable.delivery_icon_stage))
-            builder.addPicture(getDrawablePicture("delivery_prog_destination", R.drawable.delivery_icon_pin))
+            builder.addPicture(squarePicture("delivery_prog_driver", R.drawable.delivery_icon_driver))
+            builder.addPicture(squarePicture("delivery_prog_stage", R.drawable.delivery_icon_stage))
+            builder.addPicture(squarePicture("delivery_prog_destination", R.drawable.delivery_icon_pin))
             builder.setProgressBar(
                 progress = progressPercent ?: ((stage * 100) / 3),
                 color = themeColor,
@@ -188,6 +207,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             ),
             right = ImageTextInfoRight(
                 type = 2,
+                picInfo = PicInfo(type = 1, pic = "hidden_pixel"),
                 textInfo = TextInfo(eta, "")
             )
         )
