@@ -46,7 +46,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         effectiveText: String,
         picKey: String,
         config: IslandConfig,
-        theme: HyperTheme?
+        theme: HyperTheme?,
+        forcedEta: String? = null,
+        forcedRvCorpus: String? = null
     ): HyperIslandData {
 
         // 1. Resolve Theme Colors
@@ -96,10 +98,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (text.isEmpty()) {
             text = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
         }
-        // ETA kanan: regex dari teks extras saja (teks utuh, tanpa join antar-TextView).
-        // Utamakan match berhuruf ("Tiba pada 11:32", "32 menit") di atas jam telanjang.
-        // Catatan: ETA yang cuma ada di RemoteViews ("Tiba pada ..." Shopee) memang tidak
-        // ditampilkan — harga 100% extras. Kanan kosong (""), bukan teks ngaco.
+        // ETA kanan: utamakan extras (0ms). Fallback ke RemoteViews corpus via reflection
+        // (1-3ms, tanpa inflate) HANYA jika extras kosong — jadi pill tidak delay.
+        // Jika masih ingin 0ms block, ada jalur async post-pill di NotificationReaderService.
         val etaRegex = Regex(
             "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
             RegexOption.IGNORE_CASE
@@ -108,9 +109,24 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             val all = etaRegex.findAll(s).map { it.value }.toList()
             return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
         }
-        val eta = pickEta(text)
+        var eta = forcedEta?.takeIf { it.isNotBlank() }
+            ?: pickEta(text)
             ?: pickEta(title)
             ?: ""
+        // Fallback RV sync HANYA jika forcedRvCorpus disediakan (jalur async post-pill).
+        // Jalur utama (pill awal) 0ms: tidak sentuh RemoteViews sama sekali.
+        if (eta.isEmpty() && forcedRvCorpus != null) {
+            eta = pickEta(forcedRvCorpus) ?: ""
+        }
+        // Legacy sync fallback dimatikan untuk 0ms pill. Jika tetap ingin sync 1-3ms
+        // uncomment blok di bawah (reflection tanpa inflate, masih aman):
+        // if (eta.isEmpty() && extras.getBoolean("android.contains.customView", false)) {
+        //     val t0 = android.os.SystemClock.elapsedRealtime()
+        //     val rvCorpus = try { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(sbn) } catch (_: Exception) { null }
+        //     val rvEta = if (!rvCorpus.isNullOrBlank()) pickEta(rvCorpus) else null
+        //     if (!rvEta.isNullOrEmpty()) eta = rvEta
+        //     if (debug) android.util.Log.w("HyperBridgeDebug", "DELIVERY-ETA-RV pkg=${sbn.packageName} rvEta='${rvEta ?: ""}' dt=${android.os.SystemClock.elapsedRealtime() - t0}ms")
+        // }
         // Stage driver-resto-tujuan dari title+text extras (sumber kebenaran: RemoteViewsExtractor).
         val stageCorpus = "$title $text"
         val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)

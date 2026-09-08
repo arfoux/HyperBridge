@@ -10,6 +10,9 @@ import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
+import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.IconCompat
 import com.d4viddf.hyperbridge.MainActivity
 import com.d4viddf.hyperbridge.R
@@ -161,56 +164,107 @@ object TestNotificationHelper {
                 NotificationType.DELIVERY -> { title = "Driver sedang menuju Resto"; text = "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang"; channelIdForLog = "SHOPEE_LIVE_ACTIVITY_ID"; templateForLog = "DecoratedCustomViewStyle + liveId" }
             }
 
-            // Build HyperIsland pill directly (pakai Shopee logo untuk DELIVERY clone persis)
+            // Build HyperIsland pill directly — 1:1 dengan DeliveryTranslator (original)
             val hyperContext = context
             val picKey = "test_${type.name.lowercase()}_${System.currentTimeMillis() % 10000}"
             val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_${type.name.lowercase()}", title)
-            builder.setEnableFloat(true)
-            builder.setShowNotification(true)
-            builder.setIslandFirstFloat(true)
-            // Icon: banner asli sideload untuk DELIVERY (1:1), launcher untuk lain
-            val iconBmp = try {
-                if (isDeliveryShopeeClone) {
-                    loadTestBanner(context)
-                        ?: (try {
-                            val shopeeCtx = context.createPackageContext("com.shopee.id", 0)
-                            val d = shopeeCtx.packageManager.getApplicationIcon("com.shopee.id")
-                            (d as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                        } catch (_: Exception) { null })
-                        ?: createFallbackBitmap(context)
-                } else {
+            val themeColor = if (isDeliveryShopeeClone) "#EE4D2D" else "#007AFF"
+
+            if (isDeliveryShopeeClone) {
+                // 1:1 DeliveryTranslator — square logo, cover 100% lebar, ETA kanan, 3-icon garis & stepProgress
+                val prefs = com.d4viddf.hyperbridge.data.AppPreferences(context)
+                val cfg = try { prefs.getGlobalConfigSync() } catch (_: Exception) { com.d4viddf.hyperbridge.models.IslandConfig(isFloat = true, floatTimeout = 5) }
+                builder.setEnableFloat(cfg.isFloat ?: true)
+                builder.setShowNotification(true)
+                builder.setIslandFirstFloat(cfg.isFloat ?: true)
+
+                val corpus = "$title $text"
+                val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus)
+                val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, corpus)
+
+                // ETA kanan — copy persis DeliveryTranslator (regex 100% extras)
+                val etaRegex = Regex(
+                    "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
+                    RegexOption.IGNORE_CASE
+                )
+                fun pickEta(s: String): String? {
+                    val all = etaRegex.findAll(s).map { it.value }.toList()
+                    return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
+                }
+                val eta = pickEta(text) ?: pickEta(title) ?: ""
+
+                // Pictures: logo hardcode square (delivery_logo_food) + banner sideload jika ada => cover 100%
+                val logoKey = "${picKey}_logo"
+                builder.addPicture(squarePicture(context, logoKey, R.drawable.delivery_logo_food))
+                val testBanner = loadTestBanner(context)
+                val coverKey = if (testBanner != null) {
+                    builder.addPicture(io.github.d4viddf.hyperisland_kit.HyperPicture(picKey, testBanner))
+                    picKey
+                } else logoKey
+                builder.addPicture(getTransparentPicture("hidden_pixel"))
+
+                // Shade + Cover 100% (gambar tidak kepotong lingkaran)
+                builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = coverKey, actionKeys = emptyList())
+                builder.setCoverInfo(coverKey, title, text, eta)
+
+                // Garis 1:1 — stepProgress + 3 ikon driver/stage/pin, progress 100% saat stage 3 (TIBA/SELESAI)
+                if (stage != null) {
+                    builder.setStepProgress(stage, 3, themeColor)
+                    builder.addPicture(squarePicture(context, "delivery_prog_driver", R.drawable.delivery_icon_driver))
+                    builder.addPicture(squarePicture(context, "delivery_prog_stage", R.drawable.delivery_icon_stage))
+                    builder.addPicture(squarePicture(context, "delivery_prog_destination", R.drawable.delivery_icon_pin))
+                    builder.setProgressBar(
+                        progress = progressPercent ?: ((stage * 100) / 3),
+                        color = themeColor,
+                        picForwardKey = "delivery_prog_driver",
+                        picMiddleKey = "delivery_prog_stage",
+                        picEndKey = "delivery_prog_destination"
+                    )
+                }
+
+                builder.setBigIslandInfo(
+                    left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
+                        type = 1,
+                        picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = coverKey),
+                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                    ),
+                    right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
+                        type = 2,
+                        picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "hidden_pixel"),
+                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
+                    )
+                )
+                builder.setSmallIsland(coverKey)
+                builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = cfg.floatTimeout ?: 5)
+                builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
+            } else {
+                builder.setEnableFloat(true)
+                builder.setShowNotification(true)
+                builder.setIslandFirstFloat(true)
+                val iconBmp = try {
                     val d = context.packageManager.getApplicationIcon(context.packageName)
                     (d as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: createFallbackBitmap(context)
-                }
-            } catch (_: Exception) { createFallbackBitmap(context) }
-            val hyperPic = io.github.d4viddf.hyperisland_kit.HyperPicture(picKey, iconBmp)
-            builder.addPicture(hyperPic)
-            builder.addPicture(io.github.d4viddf.hyperisland_kit.HyperPicture("hidden_pixel", android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)))
-
-            val themeColor = if (isDeliveryShopeeClone) "#EE4D2D" else "#007AFF"
-            // Shade + Island
-            builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = picKey, actionKeys = emptyList())
-            builder.setBigIslandInfo(
-                left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
-                    type = 1,
-                    picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = picKey),
-                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                } catch (_: Exception) { createFallbackBitmap(context) }
+                val hyperPic = io.github.d4viddf.hyperisland_kit.HyperPicture(picKey, iconBmp)
+                builder.addPicture(hyperPic)
+                builder.addPicture(io.github.d4viddf.hyperisland_kit.HyperPicture("hidden_pixel", android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)))
+                // Shade + Island
+                builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = picKey, actionKeys = emptyList())
+                builder.setBigIslandInfo(
+                    left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
+                        type = 1,
+                        picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = picKey),
+                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                    )
                 )
-            )
-            builder.setSmallIsland(picKey)
-            builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = 10)
-            builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
+                builder.setSmallIsland(picKey)
+                builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = 10)
+                builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
 
-            if (type == NotificationType.PROGRESS || type == NotificationType.DOWNLOAD) {
-                val prog = if (type == NotificationType.PROGRESS) 45 else 62
-                builder.setProgressBar(progress = prog, color = themeColor, picForwardKey = picKey, picEndKey = "hidden_pixel")
-            }
-            // DELIVERY test juga bergaris (mapping stage yang sama dengan translator REAL)
-            if (isDeliveryShopeeClone) {
-                val corpus = "$title $text"
-                val st = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus) ?: 2
-                val pct = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(st, corpus) ?: 66
-                builder.setProgressBar(progress = pct, color = themeColor, picForwardKey = picKey, picEndKey = "hidden_pixel")
+                if (type == NotificationType.PROGRESS || type == NotificationType.DOWNLOAD) {
+                    val prog = if (type == NotificationType.PROGRESS) 45 else 62
+                    builder.setProgressBar(progress = prog, color = themeColor, picForwardKey = picKey, picEndKey = "hidden_pixel")
+                }
             }
 
             val resBundle = builder.buildResourceBundle()
@@ -244,12 +298,142 @@ object TestNotificationHelper {
         }
     }
 
+    /**
+     * TEST pill DELIVERY per stage — 1:1 dengan original (cover 100% lebar + garis 3 ikon).
+     * Bypass HyperIsland langsung, jadi tetap muncul pill walau pkg hyperbridge di-ignore.
+     * Pakai stage yang sama dengan REAL-clone, progress 100% otomatis di SELESAI (1:1 mapping).
+     */
+    fun postTestDeliveryStage(context: Context, stage: DeliveryStage) {
+        ensureTestChannel(context)
+        // Pakai id TERPISAH per stage agar 4 pill bisa muncul bersamaan untuk banding 1:1
+        val id = TEST_BASE_ID + 100 + stage.ordinal
+        try {
+            val title = stage.title
+            val text = stage.text
+            val channelIdForLog = "SHOPEE_LIVE_ACTIVITY_ID"
+            val templateForLog = "DecoratedCustomViewStyle + liveId + cover 100% + stepProgress"
+
+            val hyperContext = context
+            val picKey = "test_delivery_${stage.name.lowercase()}_${System.currentTimeMillis() % 10000}"
+            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_delivery_${stage.name.lowercase()}", title)
+            val themeColor = "#EE4D2D"
+            val prefs = com.d4viddf.hyperbridge.data.AppPreferences(context)
+            val cfg = try { prefs.getGlobalConfigSync() } catch (_: Exception) { com.d4viddf.hyperbridge.models.IslandConfig(isFloat = true, floatTimeout = 5) }
+            builder.setEnableFloat(cfg.isFloat ?: true)
+            builder.setShowNotification(true)
+            builder.setIslandFirstFloat(cfg.isFloat ?: true)
+
+            val corpus = "$title $text"
+            val stageNum = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus)
+            val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stageNum, corpus)
+
+            val etaRegex = Regex(
+                "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
+                RegexOption.IGNORE_CASE
+            )
+            fun pickEta(s: String): String? {
+                val all = etaRegex.findAll(s).map { it.value }.toList()
+                return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
+            }
+            val eta = pickEta(text) ?: pickEta(title) ?: ""
+
+            val logoKey = "${picKey}_logo"
+            builder.addPicture(squarePicture(context, logoKey, R.drawable.delivery_logo_food))
+            val testBanner = loadTestBanner(context)
+            val coverKey = if (testBanner != null) {
+                builder.addPicture(io.github.d4viddf.hyperisland_kit.HyperPicture(picKey, testBanner))
+                picKey
+            } else logoKey
+            builder.addPicture(getTransparentPicture("hidden_pixel"))
+
+            builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = coverKey, actionKeys = emptyList())
+            builder.setCoverInfo(coverKey, title, text, eta)
+
+            if (stageNum != null) {
+                builder.setStepProgress(stageNum, 3, themeColor)
+                builder.addPicture(squarePicture(context, "delivery_prog_driver", R.drawable.delivery_icon_driver))
+                builder.addPicture(squarePicture(context, "delivery_prog_stage", R.drawable.delivery_icon_stage))
+                builder.addPicture(squarePicture(context, "delivery_prog_destination", R.drawable.delivery_icon_pin))
+                builder.setProgressBar(
+                    progress = progressPercent ?: ((stageNum * 100) / 3),
+                    color = themeColor,
+                    picForwardKey = "delivery_prog_driver",
+                    picMiddleKey = "delivery_prog_stage",
+                    picEndKey = "delivery_prog_destination"
+                )
+            }
+
+            builder.setBigIslandInfo(
+                left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
+                    type = 1,
+                    picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = coverKey),
+                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                ),
+                right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
+                    type = 2,
+                    picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "hidden_pixel"),
+                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
+                )
+            )
+            builder.setSmallIsland(coverKey)
+            builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = cfg.floatTimeout ?: 5)
+            builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
+
+            val resBundle = builder.buildResourceBundle()
+            val json = builder.buildJsonParam()
+            val nm = NotificationManagerCompat.from(context)
+            val notifBuilder = NotificationCompat.Builder(context, TEST_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setOngoing(true)
+                .addExtras(resBundle)
+            val notif = notifBuilder.build()
+            notif.extras.putString("miui.focus.param", json)
+            notif.extras.putBoolean(EXTRA_TEST, true)
+            notif.extras.putString(EXTRA_TEST_TYPE, "DELIVERY_${stage.name}")
+            nm.notify(id, notif)
+            saveTestToHistory(context, com.d4viddf.hyperbridge.models.NotificationType.DELIVERY, title, text, channelIdForLog, templateForLog)
+            android.util.Log.w("HyperBridgeTest", "POSTED TEST-STAGE pill stage=${stage.name} id=$id pct=${progressPercent ?: "-"} eta='$eta' cover=$coverKey 1:1 original")
+        } catch (e: Exception) {
+            android.util.Log.e("HyperBridgeTest", "postTestDeliveryStage failed for $stage", e)
+        }
+    }
+
+    fun cancelTestDeliveryStages(context: Context) {
+        val nm = NotificationManagerCompat.from(context)
+        DeliveryStage.entries.forEach { nm.cancel(TEST_BASE_ID + 100 + it.ordinal) }
+        android.util.Log.w("HyperBridgeTest", "CANCELED TEST-STAGES")
+    }
+
     private fun createFallbackBitmap(context: Context): android.graphics.Bitmap {
         return try {
             val d = context.packageManager.getApplicationIcon(context.packageName)
             (d as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
         } catch (_: Exception) {
             android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
+        }
+    }
+
+    private fun getTransparentPicture(key: String): io.github.d4viddf.hyperisland_kit.HyperPicture {
+        val transparentBitmap = createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+        return io.github.d4viddf.hyperisland_kit.HyperPicture(key, transparentBitmap)
+    }
+
+    private fun squarePicture(context: Context, key: String, resId: Int): io.github.d4viddf.hyperisland_kit.HyperPicture {
+        return try {
+            val drawable = ContextCompat.getDrawable(context, resId)
+                ?: return io.github.d4viddf.hyperisland_kit.HyperPicture(key, createFallbackBitmap(context))
+            val src = drawable.toBitmap()
+            if (src.width == src.height) return io.github.d4viddf.hyperisland_kit.HyperPicture(key, src)
+            val size = maxOf(src.width, src.height)
+            val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(out)
+            canvas.drawBitmap(src, ((size - src.width) / 2f), ((size - src.height) / 2f), null)
+            io.github.d4viddf.hyperisland_kit.HyperPicture(key, out)
+        } catch (_: Exception) {
+            io.github.d4viddf.hyperisland_kit.HyperPicture(key, createFallbackBitmap(context))
         }
     }
 
@@ -308,6 +492,8 @@ object TestNotificationHelper {
     fun cancelAllTests(context: Context) {
         val nm = NotificationManagerCompat.from(context)
         NotificationType.entries.forEach { nm.cancel(TEST_BASE_ID + it.ordinal) }
+        // also clear per-stage TEST delivery pills (id = TEST_BASE +100+ordinal)
+        DeliveryStage.entries.forEach { nm.cancel(TEST_BASE_ID + 100 + it.ordinal) }
         android.util.Log.w("HyperBridgeTest", "CANCELED ALL TESTS")
     }
 

@@ -997,6 +997,50 @@ class NotificationReaderService : NotificationListenerService() {
             )
             updatePermanentIsland()
 
+            // --- DELIVERY ASYNC ETA (0ms pill) ---
+            // Pill sudah muncul dari extras. Jika kanan masih kosong dan ini customView Shopee,
+            // ambil jam dari RemoteViews di background lalu update island yang sama (bridgeId).
+            if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
+                val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
+                // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right
+                val isEtaEmpty = data.jsonParam.contains("\"textInfo\":{\"title\":\"\"") && data.jsonParam.contains("imageTextInfoRight")
+                if (isEtaEmpty || !hasEta) {
+                    val sbnKey = sbn.key
+                    val capturedSbn = sbn
+                    val capturedPicKey = picKey
+                    val capturedConfig = finalConfig
+                    val capturedTheme = activeTheme
+                    val capturedTitle = effectiveTitle
+                    val capturedText = effectiveText
+                    val capturedBridgeId = bridgeId
+                    val capturedEffectiveKey = effectiveKey
+                    serviceScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                        try {
+                            // Kecil delay biar pill settle, tapi tetap cepat (50ms)
+                            kotlinx.coroutines.delay(80)
+                            val rvCorpus = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
+                            val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
+                            if (!rvEta.isNullOrBlank()) {
+                                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")
+                                val updatedData = deliveryTranslator.translate(
+                                    capturedSbn, capturedTitle, capturedText, capturedPicKey, capturedConfig, capturedTheme,
+                                    forcedEta = rvEta, forcedRvCorpus = rvCorpus
+                                )
+                                // Update island yang sama — shouldAlertOnce=true agar tidak bunyi lagi
+                                postStandardNotification(capturedSbn, capturedBridgeId, updatedData, true)
+                                activeIslands[capturedEffectiveKey]?.let { old ->
+                                    activeIslands[capturedEffectiveKey] = old.copy(lastContentHash = updatedData.jsonParam.hashCode())
+                                }
+                            } else {
+                                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA miss sbn=$sbnKey corpus='${rvCorpus?.take(160) ?: "null"}'")
+                            }
+                        } catch (e: Exception) {
+                            if (debugLogEnabled()) Log.e(TAG, "DELIVERY-ASYNC-ETA error", e)
+                        }
+                    }
+                }
+            }
+
             handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, false, sbn, effectiveTitle, effectiveText)
 
         } catch (e: Exception) {

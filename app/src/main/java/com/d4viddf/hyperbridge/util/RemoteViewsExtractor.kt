@@ -1,7 +1,11 @@
 package com.d4viddf.hyperbridge.util
 
+import android.service.notification.StatusBarNotification
+import android.widget.RemoteViews
+
 /**
  * Stage/percent delivery dari teks extras (jalur produksi 100% extras, nol contentView).
+ * Fallback RV untuk ETA: reflection mActions tanpa inflate — 1-3ms, tidak delay pill.
  */
 object RemoteViewsExtractor {
 
@@ -42,4 +46,97 @@ object RemoteViewsExtractor {
         }
     }
 
+    // ========================================================================
+    //  REMOTEVIEWS FALLBACK (tanpa inflate) — dipakai setelah pill muncul
+    //  agar pill tetap instan (0ms block). Reflection mActions = 1-3ms.
+    // ========================================================================
+
+    /** Ambil semua teks dari RemoteViews via reflection mActions (tanpa inflate). */
+    fun extractRemoteViewsCorpus(sbn: StatusBarNotification): String? {
+        return try {
+            val n = sbn.notification
+            // Utamakan bigContentView (Shopee delivery pakai DecoratedCustomViewStyle + bigContentView)
+            val candidates = listOfNotNull(n.bigContentView, n.contentView, n.headsUpContentView)
+            if (candidates.isEmpty()) return null
+            val sb = StringBuilder()
+            for (rv in candidates) {
+                val t = extractTextFromRemoteViews(rv) ?: continue
+                if (t.isNotBlank()) {
+                    if (sb.isNotEmpty()) sb.append(" ")
+                    sb.append(t)
+                }
+            }
+            val out = sb.toString().replace(Regex("\\s+"), " ").trim()
+            if (out.isEmpty()) null else out.take(1200)
+        } catch (_: Exception) { null }
+    }
+
+    private fun extractTextFromRemoteViews(rv: RemoteViews): String? {
+        return try {
+            val actionsField = RemoteViews::class.java.getDeclaredField("mActions")
+            actionsField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val actions = actionsField.get(rv) as? ArrayList<*> ?: return null
+            val sb = StringBuilder()
+            for (action in actions) {
+                if (action == null) continue
+                try {
+                    val clazz = action.javaClass
+                    // Cari methodName field (di ReflectionAction)
+                    val methodNameField = runCatching {
+                        clazz.getDeclaredField("methodName")
+                    }.getOrNull() ?: runCatching {
+                        clazz.superclass?.getDeclaredField("methodName")
+                    }.getOrNull() ?: continue
+                    methodNameField.isAccessible = true
+                    val methodName = methodNameField.get(action) as? String ?: continue
+                    if (methodName != "setText" && methodName != "setTextViewText") continue
+
+                    // Ambil CharSequence value — field name bervariasi per Android version
+                    var value: CharSequence? = null
+                    val candidateFields = mutableListOf<java.lang.reflect.Field>()
+                    candidateFields.addAll(clazz.declaredFields.toList())
+                    clazz.superclass?.declaredFields?.let { candidateFields.addAll(it.toList()) }
+                    for (f in candidateFields) {
+                        if (f.name == "methodName" || f.name == "viewId" || f.name == "type" || f.name == "mViewId") continue
+                        if (!CharSequence::class.java.isAssignableFrom(f.type) && f.type != String::class.java) continue
+                        f.isAccessible = true
+                        val v = f.get(action) as? CharSequence ?: continue
+                        val s = v.toString().trim()
+                        if (s.isEmpty() || s.length > 300) continue
+                        // Hindari ambil methodName itu sendiri (“setText”)
+                        if (s == methodName) continue
+                        value = v
+                        break
+                    }
+                    if (value != null) {
+                        val s = value.toString().replace("\n", " ").trim()
+                        if (s.isNotEmpty()) {
+                            if (sb.isNotEmpty()) sb.append(" ")
+                            sb.append(s)
+                        }
+                    }
+                } catch (_: Exception) { continue }
+            }
+            val res = sb.toString().trim()
+            if (res.isEmpty()) null else res
+        } catch (_: Exception) { null }
+    }
+
+    /** Regex ETA yang sama dengan DeliveryTranslator — dipakai untuk RV corpus. */
+    private val etaRegexFallback = Regex(
+        "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun extractEtaFromCorpus(corpus: String): String? {
+        val all = etaRegexFallback.findAll(corpus).map { it.value }.toList()
+        return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
+    }
+
+    /** Convenience: langsung extract ETA dari RemoteViews sbn */
+    fun extractEtaFromRemoteViews(sbn: StatusBarNotification): String? {
+        val corpus = extractRemoteViewsCorpus(sbn) ?: return null
+        return extractEtaFromCorpus(corpus)
+    }
 }

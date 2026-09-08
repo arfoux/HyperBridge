@@ -222,6 +222,43 @@ fun TestIslandScreen(onBack: () -> Unit) {
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("DELIVERY TEST pill per stage — 1:1 original (bypass)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Bypass HyperIsland langsung (cover 100% lebar + garis 3 ikon driver/stage/pin). SELESAI = garis 100% penuh seperti ori, pill ambil 100% lebar.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        TestNotificationHelper.DeliveryStage.entries.forEach { stage ->
+                            val pct = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(
+                                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage("${stage.title} ${stage.text}"),
+                                "${stage.title} ${stage.text}"
+                            ) ?: ((com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage("${stage.title} ${stage.text}") ?: 2) * 100 / 3)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(stage.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                    Text("$pct% • ${stage.title}", style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Button(onClick = {
+                                    TestNotificationHelper.postTestDeliveryStage(context, stage)
+                                }) { Text("Post TEST") }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        OutlinedButton(onClick = {
+                            TestNotificationHelper.cancelTestDeliveryStages(context)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Cancel semua TEST-stage") }
+                    }
+                }
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
