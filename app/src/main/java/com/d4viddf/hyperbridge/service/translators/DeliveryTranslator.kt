@@ -22,17 +22,18 @@ import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
 
-    /** Center-crop square agar aset wide (logo/marker) tidak lonjong di slot lingkaran. */
+    /** Ganjal wide (motor 88x44) ke kanvas persegi transparan agar utuh, tidak lonjong/crop. */
     private fun squarePicture(key: String, resId: Int): HyperPicture {
         return try {
             val drawable = ContextCompat.getDrawable(context, resId)
                 ?: return getDrawablePicture(key, resId)
-            var bitmap = drawable.toBitmap()
-            if (bitmap.width != bitmap.height) {
-                val s = minOf(bitmap.width, bitmap.height)
-                bitmap = Bitmap.createBitmap(bitmap, (bitmap.width - s) / 2, (bitmap.height - s) / 2, s, s)
-            }
-            HyperPicture(key, bitmap)
+            val src = drawable.toBitmap()
+            if (src.width == src.height) return HyperPicture(key, src)
+            val size = maxOf(src.width, src.height)
+            val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(out)
+            canvas.drawBitmap(src, ((size - src.width) / 2f), ((size - src.height) / 2f), null)
+            HyperPicture(key, out)
         } catch (_: Exception) {
             getDrawablePicture(key, resId)
         }
