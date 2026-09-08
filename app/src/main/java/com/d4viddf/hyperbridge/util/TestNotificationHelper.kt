@@ -50,7 +50,7 @@ object TestNotificationHelper {
         ),
         MENUJU(
             "Driver sedang menuju Resto",
-            "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang",
+            "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang • Tiba pada 20:25",
             "shopee_food_orders_3252064997935104326"
         ),
         TIBA(
