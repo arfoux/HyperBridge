@@ -1477,17 +1477,6 @@ class NotificationReaderService : NotificationListenerService() {
     override fun onListenerConnected() { 
         if (debugLogEnabled()) Log.i(TAG, "HyperBridge Service Connected")
         syncNotifications(refresh = true)
-        syncJob?.cancel()
-        syncJob = serviceScope.launch {
-            while (true) {
-                delay(60_000) // 1 minute periodic sync
-                // Screen off: nothing to keep in sync visually, and SCREEN_ON runs a full
-                // refresh sync on wake — skip the tick instead of waking up all night.
-                if (isScreenOn) {
-                    syncNotifications()
-                }
-            }
-        }
     }
 
     private fun syncNotifications(refresh: Boolean = false) {
