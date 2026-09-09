@@ -19,6 +19,8 @@ interface SavedNotificationDao {
 
     @Query("DELETE FROM saved_notifications WHERE postTime < :before")
     suspend fun pruneBefore(before: Long)
+    @Query("DELETE FROM saved_notifications WHERE id NOT IN (SELECT id FROM saved_notifications ORDER BY postTime DESC LIMIT 50)")
+    suspend fun pruneKeepLatest()
 
     @Query("DELETE FROM saved_notifications")
     suspend fun clearAll()

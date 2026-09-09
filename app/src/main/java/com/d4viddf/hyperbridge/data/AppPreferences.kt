@@ -607,8 +607,8 @@ class AppPreferences(context: Context) {
     suspend fun setSaveRealNotifications(enabled: Boolean) = save(SettingsKeys.SAVE_REAL_NOTIFICATIONS, enabled.toString())
     fun saveRealNotificationsSync(): Boolean = memoryCache[SettingsKeys.SAVE_REAL_NOTIFICATIONS]?.toBooleanStrictOrNull() ?: true
 
-    // --- DEBUG: Logcat toggle (default true = perilaku sekarang) ---
-    val debugLoggingFlow: Flow<Boolean> = dao.getSettingFlow(SettingsKeys.DEBUG_LOGGING).map { it?.toBooleanStrictOrNull() ?: true }
+    // --- DEBUG: Logcat toggle (default false = hemat baterai; nyalakan manual saat diagnosa) ---
+    val debugLoggingFlow: Flow<Boolean> = dao.getSettingFlow(SettingsKeys.DEBUG_LOGGING).map { it?.toBooleanStrictOrNull() ?: false }
     suspend fun setDebugLogging(enabled: Boolean) = save(SettingsKeys.DEBUG_LOGGING, enabled.toString())
-    fun debugLoggingSync(): Boolean = memoryCache[SettingsKeys.DEBUG_LOGGING]?.toBooleanStrictOrNull() ?: true
+    fun debugLoggingSync(): Boolean = memoryCache[SettingsKeys.DEBUG_LOGGING]?.toBooleanStrictOrNull() ?: false
 }

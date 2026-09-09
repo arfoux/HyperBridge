@@ -65,7 +65,7 @@ class NotificationReaderService : NotificationListenerService() {
     private val TAG = "HyperBridgeDebug"
     private val EXTRA_ORIGINAL_KEY = "hyper_original_key"
     private fun debugLogEnabled(): Boolean =
-        if (::preferences.isInitialized) preferences.debugLoggingSync() else true
+        if (::preferences.isInitialized) preferences.debugLoggingSync() else false
 
     // --- CHANNELS ---
     private val NOTIFICATION_CHANNEL_ID = "hyper_bridge_notification_channel"
@@ -784,11 +784,7 @@ class NotificationReaderService : NotificationListenerService() {
                             extrasJson = "test=$isTestNotif;live=${extras.getString("extra_live_activity_id")};customView=${extras.getBoolean("android.contains.customView")};progress=${extras.getInt(Notification.EXTRA_PROGRESS, 0)}/${extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)};big=${extras.getCharSequence(Notification.EXTRA_BIG_TEXT)}"
                         )
                         db.savedNotificationDao().insert(entry)
-                        val all = db.savedNotificationDao().getRecentSync()
-                        if (all.size > 50) {
-                            val cutoff = all.last().postTime
-                            db.savedNotificationDao().pruneBefore(cutoff)
-                        }
+                        db.savedNotificationDao().pruneKeepLatest()
                     } catch (e: Exception) { if (debugLogEnabled()) Log.e("HyperBridgeDebug", "save history failed", e) }
                 }
             } else {
@@ -1018,14 +1014,8 @@ class NotificationReaderService : NotificationListenerService() {
                         try {
                             // Kecil delay biar pill settle, tapi tetap cepat (50ms)
                             kotlinx.coroutines.delay(80)
-                            // Coba reflection dulu (tanpa context), fallback inflate dengan context (butuh view hierarchy)
-                            var rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
-                            if (rvCorpus.isNullOrBlank()) {
-                                // Inflate butuh Context + main thread — pindah ke Main, fallback tetap async
-                                rvCorpus = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(this@NotificationReaderService, capturedSbn)
-                                }
-                            }
+                            // Reflection-only, tanpa inflate Main-thread: hemat baterai/CPU.
+                            val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
                             if (!rvEta.isNullOrBlank()) {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")

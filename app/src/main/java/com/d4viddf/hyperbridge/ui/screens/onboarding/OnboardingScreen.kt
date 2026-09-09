@@ -1299,7 +1299,7 @@ fun FeaturedNotificationCheckPage(context: Context) {
     var isGranted by remember { mutableStateOf(false) }
     
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        while (true) {
+        while (!isGranted) {
             isGranted = com.d4viddf.hyperbridge.util.XiaomiNotificationHelper.hasFocusPermission(context)
             kotlinx.coroutines.delay(1000.milliseconds)
         }
