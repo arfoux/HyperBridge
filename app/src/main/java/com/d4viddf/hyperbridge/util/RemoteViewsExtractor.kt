@@ -128,7 +128,7 @@ object RemoteViewsExtractor {
                     clazz.superclass?.declaredFields?.let { candidateFields.addAll(it.toList()) }
                     for (f in candidateFields) {
                         if (f.name == "methodName" || f.name == "viewId" || f.name == "type" || f.name == "mViewId") continue
-                        if (!CharSequence::class.java.isAssignableFrom(f.type) && f.type != String::class.java) continue
+                        if (!CharSequence::class.java.isAssignableFrom(f.type) && f.type != String::class.java && f.type != Any::class.java) continue
                         f.isAccessible = true
                         val v = f.get(action) as? CharSequence ?: continue
                         val s = v.toString().trim()
