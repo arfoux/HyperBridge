@@ -968,14 +968,10 @@ class NotificationReaderService : NotificationListenerService() {
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
 
-            // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
-            val newContentHash = data.jsonParam.hashCode()
-            if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
-
-            kotlinx.coroutines.yield()
-
             val removedTime = recentlyRemovedKeys[rawSbn.key]
-            if (removedTime != null && System.currentTimeMillis() - removedTime < 2000) {
+            // DELIVERY dikecualikan: Shopee update stage via cancel+repost key sama dalam ms;
+            // gate 2s akan bunuh semua update (pill nempel di stage 1 selamanya).
+            if (removedTime != null && System.currentTimeMillis() - removedTime < 2000 && type != NotificationType.DELIVERY) {
                 if (debugLogEnabled()) Log.d(TAG, "Skipping post because notification was recently removed: ${rawSbn.key}")
                 return
             }
