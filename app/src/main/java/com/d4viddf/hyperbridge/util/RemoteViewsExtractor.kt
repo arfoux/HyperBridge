@@ -124,12 +124,14 @@ object RemoteViewsExtractor {
                     } catch (_: Exception) { a.javaClass.simpleName }
                 }.groupingBy { it }.eachCount()
                 val sampleFields = try {
-                    val a0 = actions.firstOrNull { it != null } ?: return@try ""
-                    val c0 = (a0 as Any).javaClass
-                    val all = mutableListOf<java.lang.reflect.Field>()
-                    all.addAll(c0.declaredFields.toList())
-                    (a0 as Any).javaClass.superclass?.declaredFields?.let { all.addAll(it.toList()) }
-                    " sample[${c0.simpleName}]=" + all.joinToString(",") { "${it.name}:${it.type.simpleName}" }.take(300)
+                    val a0 = actions.firstOrNull { it != null }
+                    if (a0 == null) "" else {
+                        val c0 = (a0 as Any).javaClass
+                        val all = mutableListOf<java.lang.reflect.Field>()
+                        all.addAll(c0.declaredFields.toList())
+                        (a0 as Any).javaClass.superclass?.declaredFields?.let { all.addAll(it.toList()) }
+                        " sample[${c0.simpleName}]=" + all.joinToString(",") { "${it.name}:${it.type.simpleName}" }.take(300)
+                    }
                 } catch (_: Exception) { "" }
                 android.util.Log.w("HyperBridgeDebug", "RV-ACTIONS n=${actions.size} methods=$seen$sampleFields")
             } catch (_: Exception) {}
