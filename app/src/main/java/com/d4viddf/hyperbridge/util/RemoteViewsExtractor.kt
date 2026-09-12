@@ -112,6 +112,27 @@ object RemoteViewsExtractor {
                 android.util.Log.w("HyperBridgeDebug", "RV-REFLECT actions empty")
                 return null
             }
+            // Dump struktur action sekali — biar tau methodName/field apa yang dipakai pengirim (mis. Shopee customView)
+            try {
+                val seen = actions.take(40).mapNotNull { a ->
+                    if (a == null) return@mapNotNull null
+                    try {
+                        val c = a.javaClass
+                        val mf = runCatching { c.getDeclaredField("methodName") }.getOrNull()
+                            ?: runCatching { c.superclass?.getDeclaredField("methodName") }.getOrNull()
+                        mf?.let { it.isAccessible = true; "${c.simpleName}:${it.get(a)}" } ?: c.simpleName
+                    } catch (_: Exception) { a.javaClass.simpleName }
+                }.groupingBy { it }.eachCount()
+                val sampleFields = try {
+                    val a0 = actions.firstOrNull { it != null } ?: return@try ""
+                    val c0 = (a0 as Any).javaClass
+                    val all = mutableListOf<java.lang.reflect.Field>()
+                    all.addAll(c0.declaredFields.toList())
+                    (a0 as Any).javaClass.superclass?.declaredFields?.let { all.addAll(it.toList()) }
+                    " sample[${c0.simpleName}]=" + all.joinToString(",") { "${it.name}:${it.type.simpleName}" }.take(300)
+                } catch (_: Exception) { "" }
+                android.util.Log.w("HyperBridgeDebug", "RV-ACTIONS n=${actions.size} methods=$seen$sampleFields")
+            } catch (_: Exception) {}
             val sb = StringBuilder()
             for (action in actions) {
                 if (action == null) continue

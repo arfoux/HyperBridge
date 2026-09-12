@@ -1015,8 +1015,9 @@ class NotificationReaderService : NotificationListenerService() {
                         try {
                             // Kecil delay biar pill settle, tapi tetap cepat (50ms)
                             kotlinx.coroutines.delay(80)
-                            // Reflection-only, tanpa inflate Main-thread: hemat baterai/CPU.
-                            val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(capturedSbn)
+                            // Reflection dulu, fallback inflate (butuh context) bila reflection kosong.
+                            // Tetap async setelah pill — pill tidak delay.
+                            val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(applicationContext, capturedSbn)
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
                             if (!rvEta.isNullOrBlank()) {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")
