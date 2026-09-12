@@ -109,9 +109,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             val all = etaRegex.findAll(s).map { it.value }.toList()
             return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
         }
+        val etaCorpus = listOf(
+            text,
+            title,
+            extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+            extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+            extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty(),
+        )
         var eta = forcedEta?.takeIf { it.isNotBlank() }
-            ?: pickEta(text)
-            ?: pickEta(title)
+            ?: etaCorpus.firstNotNullOfOrNull { pickEta(it)?.takeIf(String::isNotBlank) }
             ?: ""
         // Fallback RV sync HANYA jika forcedRvCorpus disediakan (jalur async post-pill).
         // Jalur utama (pill awal) 0ms: tidak sentuh RemoteViews sama sekali.
@@ -215,7 +221,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Island Layout: kiri banner + resto, kanan ETA; small island tetap logo
+        // 7. Island Layout: kiri banner + resto, kanan ETA; small island = motor (minimized pill)
+        builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
                 type = 1,
@@ -228,7 +235,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 textInfo = TextInfo(eta, "")
             )
         )
-        builder.setSmallIsland(coverKey)
+        builder.setSmallIsland("delivery_mini_motor")
         builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
         builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
 
