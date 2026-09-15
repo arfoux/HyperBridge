@@ -106,8 +106,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         if: steps.check_dl.outputs.found != 'true'
 
-      - uses: android-actions/setup-android@v3
-        if: steps.check_dl.outputs.found != 'true'
+      # SDK Android preinstalled di runner; setup-android@v3 di-drop (paket 'tools' obsolete, exit 1).
 
       - name: Grant execute permission for gradlew
         if: steps.check_dl.outputs.found != 'true'

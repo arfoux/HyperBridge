@@ -27,7 +27,8 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
 
-      - uses: android-actions/setup-android@v3
+      # SDK Android sudah preinstalled di ubuntu-latest (ANDROID_SDK_ROOT);
+      # android-actions/setup-android@v3 gagal: install paket 'tools' obsolete (exit 1).
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
