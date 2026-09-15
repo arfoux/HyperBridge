@@ -194,9 +194,11 @@ object RemoteViewsExtractor {
             val onMain = Looper.getMainLooper().isCurrentThread
             android.util.Log.w("HyperBridgeDebug", "RV-INFLATE start thread=${Thread.currentThread().name} onMain=$onMain")
             // rv.apply wajib di main thread di sebagian ROM — lewat main Handler + latch bila dari worker.
+            // Satu context (applicationContext) di semua cabang biar tema Drawable konsisten.
+            val appCtx = context.applicationContext
             val view: android.view.View? = if (onMain) {
                 try {
-                    rv.apply(context, android.widget.FrameLayout(context))
+                    rv.apply(appCtx, android.widget.FrameLayout(appCtx))
                 } catch (e: Exception) {
                     android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
                     null
@@ -207,7 +209,7 @@ object RemoteViewsExtractor {
                 var err: String? = null
                 Handler(Looper.getMainLooper()).post {
                     try {
-                        res = rv.apply(context, android.widget.FrameLayout(context.applicationContext))
+                        res = rv.apply(appCtx, android.widget.FrameLayout(appCtx))
                     } catch (e: Exception) {
                         err = e.message
                     } finally {
