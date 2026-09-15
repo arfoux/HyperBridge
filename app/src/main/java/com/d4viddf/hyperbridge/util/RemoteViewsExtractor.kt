@@ -2,6 +2,10 @@ package com.d4viddf.hyperbridge.util
 
 import android.service.notification.StatusBarNotification
 import android.widget.RemoteViews
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Stage/percent delivery dari teks extras (jalur produksi 100% extras, nol contentView).
@@ -69,11 +73,13 @@ object RemoteViewsExtractor {
                 return null
             }
             val sb = StringBuilder()
-            for (rv in candidates) {
+            for ((idx, rv) in candidates.withIndex()) {
                 var t: String? = null
                 // 1. reflection mActions (cepat)
                 t = extractTextFromRemoteViews(rv)
-                if (t.isNullOrBlank() && context != null) {
+                val reflectBlank = t.isNullOrBlank()
+                android.util.Log.w("HyperBridgeDebug", "RV-CANDIDATE idx=$idx key=${sbn.key} hasContext=${context != null} reflectBlank=$reflectBlank")
+                if (reflectBlank && context != null) {
                     // 2. fallback inflate — butuh context, dijalankan async setelah pill
                     t = extractTextViaInflate(context, rv)
                 }
@@ -185,14 +191,35 @@ object RemoteViewsExtractor {
     private fun extractTextViaInflate(context: android.content.Context, rv: RemoteViews): String? {
         return try {
             val t0 = android.os.SystemClock.elapsedRealtime()
-            // Inflate butuh parent — FrameLayout dummy. Harus di main thread untuk layout? coba langsung, fallback ke Handler jika fail.
-            val parent = android.widget.FrameLayout(context)
-            val view = try {
-                rv.apply(context, parent)
-            } catch (e: Exception) {
-                android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
-                return null
+            val onMain = Looper.getMainLooper().isCurrentThread
+            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE start thread=${Thread.currentThread().name} onMain=$onMain")
+            // rv.apply wajib di main thread di sebagian ROM — lewat main Handler + latch bila dari worker.
+            val view: android.view.View? = if (onMain) {
+                try {
+                    rv.apply(context, android.widget.FrameLayout(context))
+                } catch (e: Exception) {
+                    android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
+                    null
+                }
+            } else {
+                val latch = CountDownLatch(1)
+                var res: android.view.View? = null
+                var err: String? = null
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        res = rv.apply(context, android.widget.FrameLayout(context.applicationContext))
+                    } catch (e: Exception) {
+                        err = e.message
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+                val done = try { latch.await(3, TimeUnit.SECONDS) } catch (_: Exception) { false }
+                if (!done) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE main-timeout")
+                if (err != null) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail $err")
+                res
             }
+            if (view == null) return null
             val sb = StringBuilder()
             fun traverse(v: android.view.View) {
                 try {
