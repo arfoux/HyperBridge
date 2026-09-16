@@ -155,11 +155,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Ingat ETA per order: stage baru tanpa waktu pakai ETA terakhir order yang sama,
         // sampai ada waktu baru (ganti) atau stage selesai (hapus).
         val liveId = extras.getString("extra_live_activity_id").orEmpty()
-        val orderKey = liveId.ifEmpty {
+        var orderKey = liveId.ifEmpty {
             // Repost tanpa liveId tetap nempel ke order terakhir dari pkg ini.
             lastOrderByPkg[sbn.packageName].orEmpty()
         }
         if (liveId.isNotEmpty()) lastOrderByPkg[sbn.packageName] = liveId
+        // Grab tak punya liveId — satu live-activity aktif per pkg, kunci per pkg.
+        if (orderKey.isEmpty() && sbn.packageName == "com.grabtaxi.passenger") {
+            orderKey = "grab:${sbn.packageName}"
+        }
         if (orderKey.isNotEmpty() && isFinishedStage(stage, stageCorpus)) {
             lastEtaByOrder.remove(orderKey)
         }
