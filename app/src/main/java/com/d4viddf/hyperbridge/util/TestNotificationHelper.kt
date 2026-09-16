@@ -172,7 +172,7 @@ object TestNotificationHelper {
                     ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
                     ?: ""
             } else ""
-            val testTicker = if (isDeliveryShopeeClone) testEta.ifEmpty { title } else title
+            val testTicker = if (isDeliveryShopeeClone) testEta.replace(" menit", "mnt").ifEmpty { title } else title
             val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_${type.name.lowercase()}", testTicker)
             val themeColor = if (isDeliveryShopeeClone) "#EE4D2D" else "#007AFF"
 
@@ -231,7 +231,7 @@ object TestNotificationHelper {
                     right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
                         type = 2,
                         picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "hidden_pixel"),
-                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
+                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta.replace(" menit", "mnt"), "")
                     )
                 )
                 builder.setSmallIsland("delivery_mini_motor")
@@ -318,8 +318,8 @@ object TestNotificationHelper {
             val stageEta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(text) }.getOrNull()
                 ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
                 ?: ""
-            // EKSPERIMEN opsi B: ticker = ETA pendek, fallback judul.
-            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_delivery_${stage.name.lowercase()}", stageEta.ifEmpty { title })
+            // Ticker = ETA ringkas, fallback judul.
+            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_delivery_${stage.name.lowercase()}", stageEta.replace(" menit", "mnt").ifEmpty { title })
             val themeColor = "#EE4D2D"
             val prefs = com.d4viddf.hyperbridge.data.AppPreferences(context)
             val cfg = try { prefs.getGlobalConfigSync() } catch (_: Exception) { com.d4viddf.hyperbridge.models.IslandConfig(isFloat = true, floatTimeout = 5) }
@@ -361,7 +361,7 @@ object TestNotificationHelper {
             }
 
             builder.addPicture(squarePicture(context, "delivery_mini_motor", R.drawable.delivery_icon_driver))
-            // EKSPERIMEN opsi B 1:1 DeliveryTranslator: kiri motor tanpa teks, kanan ETA pendek.
+            // 1:1 DeliveryTranslator: kiri logo motor doang, kanan ETA ringkas "14mnt".
             builder.setBigIslandInfo(
                 left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
                     type = 1,
@@ -371,7 +371,7 @@ object TestNotificationHelper {
                 right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
                     type = 2,
                     picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "hidden_pixel"),
-                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
+                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta.replace(" menit", "mnt"), "")
                 )
             )
             builder.setSmallIsland("delivery_mini_motor")

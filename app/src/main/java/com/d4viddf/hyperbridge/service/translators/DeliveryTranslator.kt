@@ -139,10 +139,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
 
         // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
         val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
-        // EKSPERIMEN pill pendek (opsi B): ticker = ETA pendek ("12 mnt"), bukan judul.
-        // Fallback ke judul bila ETA kosong agar ticker tak pernah kosong.
+        // Pill pendek: ticker = ETA ringkas ("14mnt"), fallback judul bila ETA kosong.
         // Judul+teks lengkap tetap tampil di shade via setBaseInfo di bawah.
-        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", eta.ifEmpty { title })
+        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", eta.replace(" menit", "mnt").ifEmpty { title })
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
@@ -215,8 +214,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Island EKSPERIMEN opsi B: kiri motor tanpa teks, kanan ETA pendek.
-        // Shade tetap lengkap via setBaseInfo; pill atas = motor + ETA saja.
+        // 7. Island: kiri logo motor doang (tanpa teks), kanan ETA ringkas "14mnt".
+        // Shade tetap lengkap via setBaseInfo; pill atas = logo + menit saja.
+        // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
+        val etaShort = eta.replace(" menit", "mnt")
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
@@ -227,7 +228,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             right = ImageTextInfoRight(
                 type = 2,
                 picInfo = PicInfo(type = 1, pic = "hidden_pixel"),
-                textInfo = TextInfo(eta, "")
+                textInfo = TextInfo(etaShort, "")
             )
         )
         builder.setSmallIsland("delivery_mini_motor")
