@@ -248,7 +248,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
         // Kosong = pinjam ETA terakhir order yang sama (shownEta).
         val etaShort = shownEta.replace(" menit", "mnt")
-        val etaShort = eta.replace(" menit", "mnt")
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
