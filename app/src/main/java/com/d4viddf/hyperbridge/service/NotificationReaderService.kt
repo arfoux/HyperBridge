@@ -995,8 +995,9 @@ class NotificationReaderService : NotificationListenerService() {
             updatePermanentIsland()
 
             // --- DELIVERY ASYNC ETA (0ms pill) ---
-            // Pill sudah muncul dari extras. Jika kanan masih kosong dan ini customView Shopee,
-            // ambil jam dari RemoteViews di background lalu update island yang sama (bridgeId).
+            // Pill sudah muncul dari extras (kanan = ETA baru, atau pinjaman ETA terakhir
+            // order yang sama bila stage ini tak bawa waktu). Cek gambar di background:
+            // hanya update bila ketemu waktu BARU; miss = biarkan pill apa adanya.
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
                 val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
                 // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right

@@ -22,6 +22,19 @@ import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
 
+    companion object {
+        /** ETA terakhir per order (key = liveId order, fallback pkg). Dipakai saat stage baru tak bawa waktu. */
+        private val lastEtaByOrder = java.util.concurrent.ConcurrentHashMap<String, String>()
+        /** Order terakhir per package — agar repost tanpa liveId tetap nempel ke order yang sama. */
+        private val lastOrderByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
+        /** Kunci order selesai: stage 3 / "selamat menikmati" menghapus ingatan ETA order itu. */
+        private fun isFinishedStage(stage: Int?, corpus: String): Boolean {
+            if (stage != null && stage >= 3) return true
+            val c = corpus.lowercase()
+            return c.contains("selamat menikmati")
+        }
+    }
+
     /** Ganjal wide (motor 88x44) ke kanvas persegi transparan agar utuh, tidak lonjong/crop. */
     private fun squarePicture(key: String, resId: Int): HyperPicture {
         return try {
@@ -128,9 +141,24 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Stage driver-resto-tujuan dari title+text extras (sumber kebenaran: RemoteViewsExtractor).
         val stageCorpus = "$title $text"
         val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
+        // Ingat ETA per order: stage baru tanpa waktu pakai ETA terakhir order yang sama,
+        // sampai ada waktu baru (ganti) atau stage selesai (hapus).
+        val liveId = extras.getString("extra_live_activity_id").orEmpty()
+        val orderKey = liveId.ifEmpty {
+            // Repost tanpa liveId tetap nempel ke order terakhir dari pkg ini.
+            lastOrderByPkg[sbn.packageName].orEmpty()
+        }
+        if (liveId.isNotEmpty()) lastOrderByPkg[sbn.packageName] = liveId
+        if (orderKey.isNotEmpty() && isFinishedStage(stage, stageCorpus)) {
+            lastEtaByOrder.remove(orderKey)
+        }
+        if (eta.isNotEmpty() && orderKey.isNotEmpty()) {
+            lastEtaByOrder[orderKey] = eta
+        }
+        val shownEta = eta.ifEmpty { orderKey.ifEmpty { null }?.let { lastEtaByOrder[it] }.orEmpty() }
         if (debug) android.util.Log.w(
             "HyperBridgeDebug",
-            "DELIVERY-ETA pkg=${sbn.packageName} eta='$eta' stage=${stage ?: "-"} title='$title' text='$text'"
+            "DELIVERY-ETA pkg=${sbn.packageName} eta='$eta' shown='$shownEta' stage=${stage ?: "-"} title='$title' text='$text'"
         )
         val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
         val current = extras.getInt(Notification.EXTRA_PROGRESS, 0)
@@ -140,8 +168,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
         val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
         // Pill pendek: ticker = ETA ringkas ("14mnt"), fallback judul bila ETA kosong.
+        // ETA kosong = ETA terakhir order yang sama (sampai ada waktu baru / stage selesai).
         // Judul+teks lengkap tetap tampil di shade via setBaseInfo di bawah.
-        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", eta.replace(" menit", "mnt").ifEmpty { title })
+        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", shownEta.replace(" menit", "mnt").ifEmpty { title })
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
@@ -217,6 +246,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 7. Island: kiri logo motor doang (tanpa teks), kanan ETA ringkas "14mnt".
         // Shade tetap lengkap via setBaseInfo; pill atas = logo + menit saja.
         // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
+        // Kosong = pinjam ETA terakhir order yang sama (shownEta).
+        val etaShort = shownEta.replace(" menit", "mnt")
         val etaShort = eta.replace(" menit", "mnt")
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
