@@ -139,7 +139,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
 
         // Persen garis dari sub-stage (sumber kebenaran: RemoteViewsExtractor).
         val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, stageCorpus)
-        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", title)
+        // EKSPERIMEN pill pendek (opsi B): ticker = ETA pendek ("12 mnt"), bukan judul.
+        // Fallback ke judul bila ETA kosong agar ticker tak pernah kosong.
+        // Judul+teks lengkap tetap tampil di shade via setBaseInfo di bawah.
+        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", eta.ifEmpty { title })
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
@@ -212,13 +215,14 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Island: kiri motor + resto (pill panjang = motor), kanan ETA; small island = motor.
+        // 7. Island EKSPERIMEN opsi B: kiri motor tanpa teks, kanan ETA pendek.
+        // Shade tetap lengkap via setBaseInfo; pill atas = motor + ETA saja.
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
                 type = 1,
                 picInfo = PicInfo(type = 1, pic = "delivery_mini_motor"),
-                textInfo = TextInfo(title, text)
+                textInfo = TextInfo("", "")
             ),
             right = ImageTextInfoRight(
                 type = 2,

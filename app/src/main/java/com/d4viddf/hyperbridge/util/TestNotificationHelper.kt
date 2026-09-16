@@ -164,10 +164,16 @@ object TestNotificationHelper {
                 NotificationType.DELIVERY -> { title = "Driver sedang menuju Resto"; text = "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang"; channelIdForLog = "SHOPEE_LIVE_ACTIVITY_ID"; templateForLog = "DecoratedCustomViewStyle + liveId" }
             }
 
-            // Build HyperIsland pill directly — 1:1 dengan DeliveryTranslator (original)
+            // Build HyperIsland pill directly — EKSPERIMEN opsi B 1:1 DeliveryTranslator.
             val hyperContext = context
             val picKey = "test_${type.name.lowercase()}_${System.currentTimeMillis() % 10000}"
-            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_${type.name.lowercase()}", title)
+            val testEta = if (isDeliveryShopeeClone) {
+                runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(text) }.getOrNull()
+                    ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
+                    ?: ""
+            } else ""
+            val testTicker = if (isDeliveryShopeeClone) testEta.ifEmpty { title } else title
+            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_${type.name.lowercase()}", testTicker)
             val themeColor = if (isDeliveryShopeeClone) "#EE4D2D" else "#007AFF"
 
             if (isDeliveryShopeeClone) {
@@ -220,7 +226,7 @@ object TestNotificationHelper {
                     left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
                         type = 1,
                         picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "delivery_mini_motor"),
-                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                        textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo("", "")
                     ),
                     right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
                         type = 2,
@@ -309,7 +315,11 @@ object TestNotificationHelper {
 
             val hyperContext = context
             val picKey = "test_delivery_${stage.name.lowercase()}_${System.currentTimeMillis() % 10000}"
-            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_delivery_${stage.name.lowercase()}", title)
+            val stageEta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(text) }.getOrNull()
+                ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
+                ?: ""
+            // EKSPERIMEN opsi B: ticker = ETA pendek, fallback judul.
+            val builder = io.github.d4viddf.hyperisland_kit.HyperIslandNotification.Builder(hyperContext, "test_delivery_${stage.name.lowercase()}", stageEta.ifEmpty { title })
             val themeColor = "#EE4D2D"
             val prefs = com.d4viddf.hyperbridge.data.AppPreferences(context)
             val cfg = try { prefs.getGlobalConfigSync() } catch (_: Exception) { com.d4viddf.hyperbridge.models.IslandConfig(isFloat = true, floatTimeout = 5) }
@@ -351,11 +361,12 @@ object TestNotificationHelper {
             }
 
             builder.addPicture(squarePicture(context, "delivery_mini_motor", R.drawable.delivery_icon_driver))
+            // EKSPERIMEN opsi B 1:1 DeliveryTranslator: kiri motor tanpa teks, kanan ETA pendek.
             builder.setBigIslandInfo(
                 left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
                     type = 1,
                     picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "delivery_mini_motor"),
-                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
+                    textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo("", "")
                 ),
                 right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
                     type = 2,
