@@ -64,8 +64,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         forcedRvCorpus: String? = null
     ): HyperIslandData {
 
-        // 1. Resolve Theme Colors
-        val themeColor = resolveColor(theme, sbn.packageName, "#EE4D2D") // Shopee orange-ish default
+        // 1. Resolve Theme Colors — hijau Grab untuk GrabFood, oranye Shopee default.
+        val themeColor = if (sbn.packageName == "com.grabtaxi.passenger") "#00B14F"
+            else resolveColor(theme, sbn.packageName, "#EE4D2D") // Shopee orange-ish default
 
         // 2. Parse Notification Content — fallback chain: ambil semua data eligible
         val extras = sbn.notification.extras
@@ -138,8 +139,18 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         //     if (!rvEta.isNullOrEmpty()) eta = rvEta
         //     if (debug) android.util.Log.w("HyperBridgeDebug", "DELIVERY-ETA-RV pkg=${sbn.packageName} rvEta='${rvEta ?: ""}' dt=${android.os.SystemClock.elapsedRealtime() - t0}ms")
         // }
-        // Stage driver-resto-tujuan dari title+text extras (sumber kebenaran: RemoteViewsExtractor).
-        val stageCorpus = "$title $text"
+        // Grab: title/text extras NULL semua — isi hanya di RemoteViews (customView).
+        // Jalur RV disediakan via forcedRvCorpus oleh caller async (NotificationReaderService);
+        // di sini title/text/RV digabung jadi satu korpus agar stage+ETA tetap kep baca.
+        val rvExtra = forcedRvCorpus.orEmpty()
+        if (title.isEmpty() && text.isEmpty() && rvExtra.isNotBlank()) {
+            // Judul pill/shade generik; detail stage tetap dari korpus RV via stage/ETA di bawah.
+            title = context.getString(R.string.type_delivery)
+            text = rvExtra.take(160)
+        }
+        // Stage driver-resto-tujuan dari title+text extras (+RV Grab bila ada,
+        // sumber kebenaran: RemoteViewsExtractor).
+        val stageCorpus = "$title $text $rvExtra"
         val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
         // Ingat ETA per order: stage baru tanpa waktu pakai ETA terakhir order yang sama,
         // sampai ada waktu baru (ganti) atau stage selesai (hapus).

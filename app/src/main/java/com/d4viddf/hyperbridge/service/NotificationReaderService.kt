@@ -711,9 +711,13 @@ class NotificationReaderService : NotificationListenerService() {
             }
 
             // [LOGIC] 3. Hard Stop — tapi jangan block Shopee LIVE_ACTIVITY eligible (punya liveId)
+            // dan GrabFood live-activity (teks hanya di RV, extras null — dibaca async).
             val hasProgress = hasProgressNotification(sbn, effectiveTitle, effectiveText)
             val isShopeeLiveEligible = sbn.packageName == "com.shopee.id" && extras.containsKey("extra_live_activity_id")
-            if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible) {
+            val isGrabLiveEligible = sbn.packageName == "com.grabtaxi.passenger" &&
+                extras.getBoolean("android.contains.customView", false) &&
+                (sbn.notification.channelId?.contains("live_activity", ignoreCase = true) == true)
+            if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible && !isGrabLiveEligible) {
                 if (debugLogEnabled()) Log.w(TAG, "HARD-STOP empty title for ${sbn.packageName} (not live)")
                 return
             }
@@ -998,11 +1002,14 @@ class NotificationReaderService : NotificationListenerService() {
             // Pill sudah muncul dari extras (kanan = ETA baru, atau pinjaman ETA terakhir
             // order yang sama bila stage ini tak bawa waktu). Cek gambar di background:
             // hanya update bila ketemu waktu BARU; miss = biarkan pill apa adanya.
+            // GRAB: extras null semua — pill awal generik, isi penuh SELALU dari RV async.
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
                 val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
                 // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right
                 val isEtaEmpty = data.jsonParam.contains("\"textInfo\":{\"title\":\"\"") && data.jsonParam.contains("imageTextInfoRight")
-                if (isEtaEmpty || !hasEta) {
+                val isGrabRvOnly = sbn.packageName == "com.grabtaxi.passenger" &&
+                    effectiveTitle.isEmpty() && effectiveText.isEmpty()
+                if (isEtaEmpty || !hasEta || isGrabRvOnly) {
                     val sbnKey = sbn.key
                     val capturedSbn = sbn
                     val capturedPicKey = picKey
@@ -1020,7 +1027,10 @@ class NotificationReaderService : NotificationListenerService() {
                             // Tetap async setelah pill — pill tidak delay.
                             val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(applicationContext, capturedSbn)
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
-                            if (!rvEta.isNullOrBlank()) {
+                            // GRAB RV-only: korpus RV = isi utama (stage/ETA/shade), update walau tanpa ETA.
+                            // Shopee: hanya update bila ketemu waktu baru (pinjaman lama tetap tampil bila miss).
+                            val isGrabUpdate = capturedSbn.packageName == "com.grabtaxi.passenger" && !rvCorpus.isNullOrBlank()
+                            if (!rvEta.isNullOrBlank() || isGrabUpdate) {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")
                                 val updatedData = deliveryTranslator.translate(
                                     capturedSbn, capturedTitle, capturedText, capturedPicKey, capturedConfig, capturedTheme,
@@ -1207,6 +1217,11 @@ class NotificationReaderService : NotificationListenerService() {
                 (hasCustomView && channelId.contains("SHOPEE", ignoreCase = true) && hasFoodKeyword && !isPromo)
             )
         val isShopeeFoodFallback = isShopee && channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo
+        // --- GRAB ELIGIBLE CHECK (observed 2026-09-16: live_activity_channel_01,
+        // DecoratedCustomViewStyle + customView, title/text extras NULL — isi di RemoteViews) ---
+        val isGrab = sbn.packageName == "com.grabtaxi.passenger"
+        val isGrabFoodEligible = isGrab && hasCustomView &&
+            (channelId.contains("live_activity", ignoreCase = true) || channelId.contains("grabfood", ignoreCase = true) || channelId.contains("food", ignoreCase = true))
 
         val title = resolveTitle(sbn)
         val text = resolveText(extras)
@@ -1223,6 +1238,8 @@ class NotificationReaderService : NotificationListenerService() {
             // ShopeFood delivery harus diutamakan sebelum MESSAGE agar tidak salah jadi chat
             isShopeeFoodEligible -> NotificationType.DELIVERY
             isShopeeFoodFallback -> NotificationType.DELIVERY
+            // GrabFood: teks hanya di RV (extras null) — tetap DELIVERY, isi dibaca async.
+            isGrabFoodEligible -> NotificationType.DELIVERY
             isMessage -> NotificationType.MESSAGE
             isProgressStyle -> NotificationType.DELIVERY
             isLiveActivity -> NotificationType.DELIVERY
