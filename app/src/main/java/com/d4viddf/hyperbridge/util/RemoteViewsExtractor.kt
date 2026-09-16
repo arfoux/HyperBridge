@@ -56,32 +56,32 @@ object RemoteViewsExtractor {
     // ========================================================================
 
     /** Ambil semua teks dari RemoteViews — coba reflection, fallback inflate (async, tetap 0ms pill). */
-    fun extractRemoteViewsCorpus(sbn: StatusBarNotification): String? {
-        return extractRemoteViewsCorpusInternal(sbn, null)
+    fun extractRemoteViewsCorpus(sbn: StatusBarNotification, debug: Boolean = false): String? {
+        return extractRemoteViewsCorpusInternal(sbn, null, debug)
     }
 
-    fun extractRemoteViewsCorpusWithContext(context: android.content.Context, sbn: StatusBarNotification): String? {
-        return extractRemoteViewsCorpusInternal(sbn, context)
+    fun extractRemoteViewsCorpusWithContext(context: android.content.Context, sbn: StatusBarNotification, debug: Boolean = false): String? {
+        return extractRemoteViewsCorpusInternal(sbn, context, debug)
     }
 
-    private fun extractRemoteViewsCorpusInternal(sbn: StatusBarNotification, context: android.content.Context?): String? {
+    private fun extractRemoteViewsCorpusInternal(sbn: StatusBarNotification, context: android.content.Context?, debug: Boolean = false): String? {
         return try {
             val n = sbn.notification
             val candidates = listOfNotNull(n.bigContentView, n.contentView, n.headsUpContentView)
             if (candidates.isEmpty()) {
-                android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT no RemoteViews for ${sbn.key}")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT no RemoteViews for ${sbn.key}")
                 return null
             }
             val sb = StringBuilder()
             for ((idx, rv) in candidates.withIndex()) {
                 var t: String? = null
                 // 1. reflection mActions (cepat)
-                t = extractTextFromRemoteViews(rv)
+                t = extractTextFromRemoteViews(rv, debug)
                 val reflectBlank = t.isNullOrBlank()
-                android.util.Log.w("HyperBridgeDebug", "RV-CANDIDATE idx=$idx key=${sbn.key} hasContext=${context != null} reflectBlank=$reflectBlank")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-CANDIDATE idx=$idx key=${sbn.key} hasContext=${context != null} reflectBlank=$reflectBlank")
                 if (reflectBlank && context != null) {
                     // 2. fallback inflate — butuh context, dijalankan async setelah pill
-                    t = extractTextViaInflate(context, rv)
+                    t = extractTextViaInflate(context, rv, debug)
                 }
                 if (!t.isNullOrBlank()) {
                     if (sb.isNotEmpty()) sb.append(" ")
@@ -90,36 +90,36 @@ object RemoteViewsExtractor {
             }
             val out = sb.toString().replace(Regex("\\s+"), " ").trim()
             if (out.isEmpty()) {
-                android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT empty corpus key=${sbn.key} rvCount=${candidates.size}")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT empty corpus key=${sbn.key} rvCount=${candidates.size}")
                 null
             } else out.take(2000)
         } catch (e: Exception) {
-            android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT exception ${e.message}")
+            if (debug) android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT exception ${e.message}")
             null
         }
     }
 
-    private fun extractTextFromRemoteViews(rv: RemoteViews): String? {
+    private fun extractTextFromRemoteViews(rv: RemoteViews, debug: Boolean = false): String? {
         return try {
             // Hidden API di Android 13+ bisa block getDeclaredField — log biar tau
             val actionsField = try {
                 RemoteViews::class.java.getDeclaredField("mActions")
             } catch (e: Exception) {
-                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT no mActions field ${e.message}")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-REFLECT no mActions field ${e.message}")
                 return null
             }
             actionsField.isAccessible = true
             @Suppress("UNCHECKED_CAST")
             val actions = actionsField.get(rv) as? ArrayList<*> ?: run {
-                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT mActions null/empty")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-REFLECT mActions null/empty")
                 return null
             }
             if (actions.isEmpty()) {
-                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT actions empty")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-REFLECT actions empty")
                 return null
             }
             // Dump struktur action sekali — biar tau methodName/field apa yang dipakai pengirim (mis. Shopee customView)
-            try {
+            if (debug) try {
                 val seen = actions.take(40).mapNotNull { a ->
                     if (a == null) return@mapNotNull null
                     try {
@@ -139,7 +139,7 @@ object RemoteViewsExtractor {
                         " sample[${c0.simpleName}]=" + all.joinToString(",") { "${it.name}:${it.type.simpleName}" }.take(300)
                     }
                 } catch (_: Exception) { "" }
-                android.util.Log.w("HyperBridgeDebug", "RV-ACTIONS n=${actions.size} methods=$seen$sampleFields")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-ACTIONS n=${actions.size} methods=$seen$sampleFields")
             } catch (_: Exception) {}
             val sb = StringBuilder()
             for (action in actions) {
@@ -179,20 +179,20 @@ object RemoteViewsExtractor {
             }
             val res = sb.toString().trim()
             if (res.isEmpty()) {
-                android.util.Log.w("HyperBridgeDebug", "RV-REFLECT corpus empty actions=${actions.size}")
+                if (debug) android.util.Log.w("HyperBridgeDebug", "RV-REFLECT corpus empty actions=${actions.size}")
                 null
             } else res
         } catch (e: Exception) {
-            android.util.Log.w("HyperBridgeDebug", "RV-REFLECT exception ${e.message}")
+            if (debug) android.util.Log.w("HyperBridgeDebug", "RV-REFLECT exception ${e.message}")
             null
         }
     }
 
-    private fun extractTextViaInflate(context: android.content.Context, rv: RemoteViews): String? {
+    private fun extractTextViaInflate(context: android.content.Context, rv: RemoteViews, debug: Boolean = false): String? {
         return try {
             val t0 = android.os.SystemClock.elapsedRealtime()
             val onMain = Looper.getMainLooper().isCurrentThread
-            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE start thread=${Thread.currentThread().name} onMain=$onMain")
+            if (debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE start thread=${Thread.currentThread().name} onMain=$onMain")
             // rv.apply wajib di main thread di sebagian ROM — lewat main Handler + latch bila dari worker.
             // Satu context (applicationContext) di semua cabang biar tema Drawable konsisten.
             val appCtx = context.applicationContext
@@ -200,7 +200,7 @@ object RemoteViewsExtractor {
                 try {
                     rv.apply(appCtx, android.widget.FrameLayout(appCtx))
                 } catch (e: Exception) {
-                    android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
+                    if (debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail ${e.message}")
                     null
                 }
             } else {
@@ -217,8 +217,8 @@ object RemoteViewsExtractor {
                     }
                 }
                 val done = try { latch.await(3, TimeUnit.SECONDS) } catch (_: Exception) { false }
-                if (!done) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE main-timeout")
-                if (err != null) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail $err")
+                if (!done && debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE main-timeout")
+                if (err != null && debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE apply fail $err")
                 res
             }
             if (view == null) return null
@@ -241,23 +241,97 @@ object RemoteViewsExtractor {
             try { (view.parent as? android.view.ViewGroup)?.removeView(view) } catch (_: Exception) {}
             val dt = android.os.SystemClock.elapsedRealtime() - t0
             val out = sb.toString().replace(Regex("\\s+"), " ").trim()
-            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE ok dt=${dt}ms corpus='${out.take(180)}'")
+            if (debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE ok dt=${dt}ms corpus='${out.take(180)}'")
             if (out.isEmpty()) null else out
         } catch (e: Exception) {
-            android.util.Log.w("HyperBridgeDebug", "RV-INFLATE exception ${e.message}")
+            if (debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE exception ${e.message}")
             null
         }
     }
 
-    /** Regex ETA yang sama dengan DeliveryTranslator — dipakai untuk RV corpus. */
+    /** Regex ETA tunggal — menit menang atas range jam. Dipakai semua jalur. */
     private val etaRegexFallback = Regex(
-        "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
+        "\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b|tiba\\s+dalam\\s+\\d+|estimasi\\s+\\d+|\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b",
         RegexOption.IGNORE_CASE
     )
+    private val minuteRegex = Regex("\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b|tiba\\s+dalam\\s+\\d+|estimasi\\s+\\d+", RegexOption.IGNORE_CASE)
+    private val rangeRegex = Regex("\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}", RegexOption.IGNORE_CASE)
+    private val singleTimeRegex = Regex("\\d{1,2}[.:]\\d{2}")
 
     fun extractEtaFromCorpus(corpus: String): String? {
         val all = etaRegexFallback.findAll(corpus).map { it.value }.toList()
-        return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
+        if (all.isEmpty()) return null
+        // 1. Menit tertulis menang.
+        val minuteMatch = all.firstOrNull { it.matches(minuteRegex) }
+        if (minuteMatch != null) {
+            val n = Regex("\\d+").find(minuteMatch)?.value?.toIntOrNull()
+            if (n != null) return "$n menit"
+            return minuteMatch
+        }
+        // 2. Range jam -> hitung menit dari data yang ada, jangan tampilkan range mentah.
+        //    Utamakan sisa waktu (ujung range - sekarang), fallback durasi (ujung - awal).
+        val rangeMatch = all.firstOrNull { it.matches(rangeRegex) }
+        if (rangeMatch != null) {
+            val end = parseRangeEnd(rangeMatch)
+            if (end != null) {
+                val rem = minutesUntil(end)
+                if (rem in 1..180) return "$rem menit"
+            }
+            val dur = parseTimeRangeDuration(rangeMatch)
+            if (dur != null && dur in 1..180) return "$dur menit"
+            return null
+        }
+        // 3. Jam tunggal ("Tiba pada 20:25" / "20:25") -> sisa menit bila masuk akal.
+        val singleMatch = all.firstOrNull() ?: return null
+        val t = singleTimeRegex.find(singleMatch)?.value?.let { parseTimePart(it.replace(".", ":")) }
+        if (t != null) {
+            val rem = minutesUntil(t)
+            if (rem in 1..180) return "$rem menit"
+        }
+        return singleMatch
+    }
+
+    /** Menit sisa dari sekarang ke target (menit-of-day). Wrap midnight. */
+    private fun minutesUntil(targetMinOfDay: Int): Int {
+        return try {
+            val cal = java.util.Calendar.getInstance()
+            val now = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+            var diff = targetMinOfDay - now
+            if (diff <= 0) diff += 24 * 60
+            diff
+        } catch (_: Exception) { -1 }
+    }
+
+    private fun parseRangeEnd(range: String): Int? {
+        val normalized = range.replace("–", "-").replace("—", "-")
+        val parts = normalized.split("\\s*-\\s*".toRegex())
+        if (parts.size != 2) return null
+        return parseTimePart(parts[1].trim().replace(".", ":"))
+    }
+
+    /** Durasi range dalam menit (ujung - awal), mis. "08:52 - 09:02" -> 10. */
+    private fun parseTimeRangeDuration(timeRange: String): Int? {
+        val normalized = timeRange.replace("–", "-").replace("—", "-")
+        val parts = normalized.split("\\s*-\\s*".toRegex())
+        if (parts.size != 2) return null
+        val start = parseTimePart(parts[0].trim().replace(".", ":"))
+        val end = parseTimePart(parts[1].trim().replace(".", ":"))
+        if (start == null || end == null) return null
+        val diff = end - start
+        return if (diff < 0) diff + 24 * 60 else diff
+    }
+
+    // Alias lama biar pemanggil lama tetap kompilasi.
+    private fun parseTimeRangeToMinutes(timeRange: String): Int? = parseTimeRangeDuration(timeRange)
+
+    private fun parseTimePart(timePart: String): Int? {
+        val timeComponents = timePart.split(":")
+        if (timeComponents.size != 2) return null
+        val hours = timeComponents[0].toIntOrNull()
+        val minutes = timeComponents[1].toIntOrNull()
+        if (hours == null || minutes == null) return null
+        if (hours !in 0..23 || minutes !in 0..59) return null
+        return hours * 60 + minutes
     }
 
     /** Convenience: langsung extract ETA dari RemoteViews sbn */

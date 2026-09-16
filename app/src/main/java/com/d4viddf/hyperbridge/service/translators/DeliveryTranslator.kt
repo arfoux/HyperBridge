@@ -98,17 +98,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (text.isEmpty()) {
             text = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.replace("\n", " ")?.trim() ?: ""
         }
-        // ETA kanan: utamakan extras (0ms). Fallback ke RemoteViews corpus via reflection
-        // (1-3ms, tanpa inflate) HANYA jika extras kosong — jadi pill tidak delay.
-        // Jika masih ingin 0ms block, ada jalur async post-pill di NotificationReaderService.
-        val etaRegex = Regex(
-            "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
-            RegexOption.IGNORE_CASE
-        )
-        fun pickEta(s: String): String? {
-            val all = etaRegex.findAll(s).map { it.value }.toList()
-            return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
-        }
+        // ETA kanan: menit tertulis menang; kalau cuma range/jam, hitung menit dari data yang ada.
+        // Sumber tunggal: RemoteViewsExtractor.extractEtaFromCorpus (0ms, tanpa inflate di jalur pill).
         val etaCorpus = listOf(
             text,
             title,
@@ -117,19 +108,20 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty(),
         )
         var eta = forcedEta?.takeIf { it.isNotBlank() }
-            ?: etaCorpus.firstNotNullOfOrNull { pickEta(it)?.takeIf(String::isNotBlank) }
+            ?: etaCorpus.firstNotNullOfOrNull {
+                runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }.getOrNull()?.takeIf(String::isNotBlank)
+            }
             ?: ""
         // Fallback RV sync HANYA jika forcedRvCorpus disediakan (jalur async post-pill).
         // Jalur utama (pill awal) 0ms: tidak sentuh RemoteViews sama sekali.
         if (eta.isEmpty() && forcedRvCorpus != null) {
-            eta = pickEta(forcedRvCorpus) ?: ""
+            eta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(forcedRvCorpus) }.getOrNull() ?: ""
         }
-        // Legacy sync fallback dimatikan untuk 0ms pill. Jika tetap ingin sync 1-3ms
-        // uncomment blok di bawah (reflection tanpa inflate, masih aman):
+        // Legacy sync fallback dimatikan untuk 0ms pill.
         // if (eta.isEmpty() && extras.getBoolean("android.contains.customView", false)) {
         //     val t0 = android.os.SystemClock.elapsedRealtime()
         //     val rvCorpus = try { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(sbn) } catch (_: Exception) { null }
-        //     val rvEta = if (!rvCorpus.isNullOrBlank()) pickEta(rvCorpus) else null
+        //     val rvEta = if (!rvCorpus.isNullOrBlank()) runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(rvCorpus) }.getOrNull() else null
         //     if (!rvEta.isNullOrEmpty()) eta = rvEta
         //     if (debug) android.util.Log.w("HyperBridgeDebug", "DELIVERY-ETA-RV pkg=${sbn.packageName} rvEta='${rvEta ?: ""}' dt=${android.os.SystemClock.elapsedRealtime() - t0}ms")
         // }
@@ -195,8 +187,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             pictureKey = coverKey,
             actionKeys = actionKeys
         )
-        // 6a. Cover persegi: banner + resto + ETA (gambar tidak kepotong lingkaran)
-        builder.setCoverInfo(coverKey, title, text, eta)
+        // 6. Cover dihapus: penyebab long-pill di island. Shade tetap informatif via setBaseInfo di atas.
         // 6b. Progress oranye: setStepProgress (bila sistem render) + progress bar
         // gaya taksi/delivery dengan IKON ASLI pengirim (driver bergerak di garis).
         // Percent dari stage: 1->33, 2->66, 3->100 (penuh seperti ori saat tiba).
@@ -221,12 +212,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Island Layout: kiri banner + resto, kanan ETA; small island = motor (minimized pill)
+        // 7. Island: kiri motor + resto (pill panjang = motor), kanan ETA; small island = motor.
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
                 type = 1,
-                picInfo = PicInfo(type = 1, pic = coverKey),
+                picInfo = PicInfo(type = 1, pic = "delivery_mini_motor"),
                 textInfo = TextInfo(title, text)
             ),
             right = ImageTextInfoRight(

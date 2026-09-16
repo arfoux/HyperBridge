@@ -182,16 +182,10 @@ object TestNotificationHelper {
                 val stage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus)
                 val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stage, corpus)
 
-                // ETA kanan — copy persis DeliveryTranslator (regex 100% extras)
-                val etaRegex = Regex(
-                    "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
-                    RegexOption.IGNORE_CASE
-                )
-                fun pickEta(s: String): String? {
-                    val all = etaRegex.findAll(s).map { it.value }.toList()
-                    return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
-                }
-                val eta = pickEta(text) ?: pickEta(title) ?: ""
+                // ETA kanan — sumber tunggal RemoteViewsExtractor (menit menang, range/jam dihitung)
+                val eta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(text) }.getOrNull()
+                    ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
+                    ?: ""
 
                 // Pictures: logo hardcode square (delivery_logo_food) + banner sideload jika ada => cover 100%
                 val logoKey = "${picKey}_logo"
@@ -203,9 +197,8 @@ object TestNotificationHelper {
                 } else logoKey
                 builder.addPicture(getTransparentPicture("hidden_pixel"))
 
-                // Shade + Cover 100% (gambar tidak kepotong lingkaran)
+                // Shade tetap informatif; cover dihapus (penyebab long-pill), 1:1 DeliveryTranslator.
                 builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = coverKey, actionKeys = emptyList())
-                builder.setCoverInfo(coverKey, title, text, eta)
 
                 // Garis 1:1 — stepProgress + 3 ikon driver/stage/pin, progress 100% saat stage 3 (TIBA/SELESAI)
                 if (stage != null) {
@@ -222,10 +215,11 @@ object TestNotificationHelper {
                     )
                 }
 
+                builder.addPicture(squarePicture(context, "delivery_mini_motor", R.drawable.delivery_icon_driver))
                 builder.setBigIslandInfo(
                     left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
                         type = 1,
-                        picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = coverKey),
+                        picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "delivery_mini_motor"),
                         textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
                     ),
                     right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
@@ -234,7 +228,7 @@ object TestNotificationHelper {
                         textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
                     )
                 )
-                builder.setSmallIsland(coverKey)
+                builder.setSmallIsland("delivery_mini_motor")
                 builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = cfg.floatTimeout ?: 5)
                 builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
             } else {
@@ -327,15 +321,9 @@ object TestNotificationHelper {
             val stageNum = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus)
             val progressPercent = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryPercent(stageNum, corpus)
 
-            val etaRegex = Regex(
-                "\\d{1,2}[.:]\\d{2}\\s*-\\s*\\d{1,2}[.:]\\d{2}|tiba pada\\s+\\d{1,2}[.:]\\d{2}|\\d{1,2}:\\d{2}\\s*[–-]\\s*\\d{1,2}:\\d{2}|\\b\\d{1,2}:\\d{2}\\b|\\b\\d+\\s*menit\\b|\\b\\d+\\s*m\\b",
-                RegexOption.IGNORE_CASE
-            )
-            fun pickEta(s: String): String? {
-                val all = etaRegex.findAll(s).map { it.value }.toList()
-                return all.firstOrNull { it.any(Char::isLetter) } ?: all.firstOrNull()
-            }
-            val eta = pickEta(text) ?: pickEta(title) ?: ""
+            val eta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(text) }.getOrNull()
+                ?: runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(title) }.getOrNull()
+                ?: ""
 
             val logoKey = "${picKey}_logo"
             builder.addPicture(squarePicture(context, logoKey, R.drawable.delivery_logo_food))
@@ -347,7 +335,6 @@ object TestNotificationHelper {
             builder.addPicture(getTransparentPicture("hidden_pixel"))
 
             builder.setBaseInfo(type = 1, title = title, content = text, pictureKey = coverKey, actionKeys = emptyList())
-            builder.setCoverInfo(coverKey, title, text, eta)
 
             if (stageNum != null) {
                 builder.setStepProgress(stageNum, 3, themeColor)
@@ -363,10 +350,11 @@ object TestNotificationHelper {
                 )
             }
 
+            builder.addPicture(squarePicture(context, "delivery_mini_motor", R.drawable.delivery_icon_driver))
             builder.setBigIslandInfo(
                 left = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft(
                     type = 1,
-                    picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = coverKey),
+                    picInfo = io.github.d4viddf.hyperisland_kit.models.PicInfo(type = 1, pic = "delivery_mini_motor"),
                     textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(title, text)
                 ),
                 right = io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight(
@@ -375,7 +363,7 @@ object TestNotificationHelper {
                     textInfo = io.github.d4viddf.hyperisland_kit.models.TextInfo(eta, "")
                 )
             )
-            builder.setSmallIsland(coverKey)
+            builder.setSmallIsland("delivery_mini_motor")
             builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = cfg.floatTimeout ?: 5)
             builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
 
