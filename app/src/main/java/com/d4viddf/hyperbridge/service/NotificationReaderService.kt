@@ -795,13 +795,16 @@ class NotificationReaderService : NotificationListenerService() {
                 if (debugLogEnabled()) Log.w("HyperBridgeDebug", "SKIP save REAL (toggle off) pkg=${sbn.packageName} type=$type")
             }
 
-            // --- LAYERED TRIGGERS LOGIC — fallback: Shopee DELIVERY eligible auto-allow jika channel/LIVE_ACTIVITY ---
+            // --- LAYERED TRIGGERS LOGIC — fallback: Shopee/Grab DELIVERY eligible auto-allow ---
             val effectiveTypes = getEffectiveTypes(sbn.packageName)
             if (!effectiveTypes.contains(type.name)) {
                 val isShopeeDeliveryBypass = sbn.packageName == "com.shopee.id" && type == NotificationType.DELIVERY &&
                     (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
-                if (isShopeeDeliveryBypass) {
-                    if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for Shopee DELIVERY: $effectiveTypes -> force allow (auto-enable)")
+                // Grab Transaction stage ("In the kitchen", "is here", ...) = order aktif,
+                // auto-allow seperti Shopee live (promo GrabMore/Feedback/CALL sudah dikecualikan di detect).
+                val isGrabDeliveryBypass = sbn.packageName == "com.grabtaxi.passenger" && type == NotificationType.DELIVERY
+                if (isShopeeDeliveryBypass || isGrabDeliveryBypass) {
+                    if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for ${sbn.packageName} DELIVERY: $effectiveTypes -> force allow (auto-enable)")
                     serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
                 } else {
                     if (debugLogEnabled()) Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
@@ -1217,11 +1220,26 @@ class NotificationReaderService : NotificationListenerService() {
                 (hasCustomView && channelId.contains("SHOPEE", ignoreCase = true) && hasFoodKeyword && !isPromo)
             )
         val isShopeeFoodFallback = isShopee && channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo
-        // --- GRAB ELIGIBLE CHECK (observed 2026-09-16: live_activity_channel_01,
-        // DecoratedCustomViewStyle + customView, title/text extras NULL — isi di RemoteViews) ---
+        // --- GRAB ELIGIBLE CHECK (observed 2026-09-17, order Burjo Titik Kumpul) ---
+        // Dua jalur sejajar:
+        //  (a) live_activity_channel_01 + customView, extras NULL — isi di RemoteViews (dibaca async).
+        //  (b) channel Transaction + BigTextStyle, extras LENGKAP ("In the kitchen",
+        //      "Burjo ... is preparing your order...") — stage Grab, 1:1 Shopee extras.
+        // Promo ("Offers From Grab": GrabMore/Bintang Lima) + Feedback + CALL dikecualikan.
         val isGrab = sbn.packageName == "com.grabtaxi.passenger"
-        val isGrabFoodEligible = isGrab && hasCustomView &&
+        val isGrabLiveEligible = isGrab && hasCustomView &&
             (channelId.contains("live_activity", ignoreCase = true) || channelId.contains("grabfood", ignoreCase = true) || channelId.contains("food", ignoreCase = true))
+        val isGrabPromoChannel = channelId.contains("offers", ignoreCase = true) ||
+            channelId.contains("feedback", ignoreCase = true)
+        val hasGrabKeyword = combined.contains("preparing your order") || combined.contains("in the kitchen") ||
+            combined.contains("is here") || combined.contains("on the way") || combined.contains("on its way") ||
+            combined.contains("arriving") || combined.contains("picked up") || combined.contains("your order") ||
+            combined.contains("driver") || combined.contains("resto") || combined.contains("restaurant")
+        val isGrabPromo = combined.contains("grabmore") || combined.contains("diskon ongkir") ||
+            combined.contains("bintang lima") || combined.contains("verdict") ||
+            combined.contains("tell us what you think")
+        val isGrabFoodEligible = isGrabLiveEligible ||
+            (isGrab && channelId.equals("Transaction", ignoreCase = true) && hasGrabKeyword && !isGrabPromo && !isGrabPromoChannel)
 
         val title = resolveTitle(sbn)
         val text = resolveText(extras)
@@ -1238,7 +1256,7 @@ class NotificationReaderService : NotificationListenerService() {
             // ShopeFood delivery harus diutamakan sebelum MESSAGE agar tidak salah jadi chat
             isShopeeFoodEligible -> NotificationType.DELIVERY
             isShopeeFoodFallback -> NotificationType.DELIVERY
-            // GrabFood: teks hanya di RV (extras null) — tetap DELIVERY, isi dibaca async.
+            // GrabFood: live-activity RV-only + Transaction ber-teks — tetap DELIVERY, isi dibaca async.
             isGrabFoodEligible -> NotificationType.DELIVERY
             isMessage -> NotificationType.MESSAGE
             isProgressStyle -> NotificationType.DELIVERY
@@ -1437,6 +1455,18 @@ class NotificationReaderService : NotificationListenerService() {
 
         // ShopeFood LIVE eligible tidak pernah junk — ambil semua data eligible
         if (pkg == "com.shopee.id" && extras.containsKey("extra_live_activity_id")) return false
+        // GrabFood: live-activity RV-only + Transaction stage ("In the kitchen", "is here")
+        // tidak pernah junk — teks Inggris, tak cocok pola junk Indonesia.
+        if (pkg == "com.grabtaxi.passenger") {
+            val ch = notification.channelId ?: ""
+            if (ch.contains("live_activity", ignoreCase = true)) return false
+            if (ch.equals("Transaction", ignoreCase = true)) {
+                val c = "$title $text".lowercase()
+                if (c.contains("preparing your order") || c.contains("in the kitchen") ||
+                    c.contains("is here") || c.contains("on the way") || c.contains("on its way") ||
+                    c.contains("arriving") || c.contains("picked up")) return false
+            }
+        }
         // ShopeeFood via RemoteViews juga eligible (fallback jika tanpa liveId tapi customView + food keyword)
         if (pkg == "com.shopee.id" && extras.getBoolean("android.contains.customView", false)) {
             val ch = notification.channelId ?: ""

@@ -16,19 +16,26 @@ object RemoteViewsExtractor {
     /**
      * Stage driver-resto-tujuan dari keyword status (tahap tertinggi menang).
      * "tiba pada HH:MM"/"estimasi tiba"/"tiba dalam" = ESTIMASI, bukan tiba.
+     * Mendukung ID (Shopee) + EN (Grab: "In the kitchen", "is here", "on the way").
      * Sumber kebenaran tunggal — dipakai translator dan test.
      */
     fun deliveryStage(corpusRaw: String): Int? {
         val corpus = corpusRaw.lowercase()
-        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}[.:]\\d{2}|estimasi\\s+tiba|tiba\\s+dalam").containsMatchIn(corpus)
+        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}[.:]\\d{2}|estimasi\\s+tiba|tiba\\s+dalam|arriving\\s+in|arriving\\s+at|eta\\s+\\d").containsMatchIn(corpus)
         return when {
             corpus.contains("selamat menikmati") || corpus.contains("sudah tiba") ||
                 corpus.contains("telah tiba") || corpus.contains("selesai") ||
+                corpus.contains("is here") || corpus.contains("delivered") ||
+                corpus.contains("order complete") || corpus.contains("enjoy your meal") ||
                 (corpus.contains("tiba") && !corpus.contains("hampir tiba") && !etaEstimate) -> 3
             corpus.contains("hampir tiba") || corpus.contains("menuju") ||
-                corpus.contains("diantar") || corpus.contains("dalam perjalanan") -> 2
+                corpus.contains("diantar") || corpus.contains("dalam perjalanan") ||
+                corpus.contains("on the way") || corpus.contains("on its way") ||
+                corpus.contains("arriving") || corpus.contains("picked up") ||
+                corpus.contains("heading to") || corpus.contains("heading your way") -> 2
             corpus.contains("disiapkan") || corpus.contains("menyiapkan") ||
-                corpus.contains("diproses") -> 1
+                corpus.contains("diproses") || corpus.contains("in the kitchen") ||
+                corpus.contains("preparing your order") || corpus.contains("preparing") -> 1
             else -> null
         }
     }
@@ -39,13 +46,17 @@ object RemoteViewsExtractor {
         val lowerAll = corpusRaw.lowercase()
         return when {
             lowerAll.contains("selamat menikmati") || lowerAll.contains("sudah tiba") ||
-                lowerAll.contains("telah tiba") || lowerAll.contains("selesai") -> 100
+                lowerAll.contains("telah tiba") || lowerAll.contains("selesai") ||
+                lowerAll.contains("is here") || lowerAll.contains("delivered") -> 100
             lowerAll.contains("hampir tiba") || lowerAll.contains("menuju lokasi") ||
-                lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") -> 70
+                lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") ||
+                lowerAll.contains("on the way") || lowerAll.contains("on its way") ||
+                lowerAll.contains("arriving") || lowerAll.contains("picked up") -> 70
             lowerAll.contains("menuju resto") || lowerAll.contains("menuju ke resto") ||
                 lowerAll.contains("menuju") -> 35
             lowerAll.contains("disiapkan") || lowerAll.contains("menyiapkan") ||
-                lowerAll.contains("diproses") -> 15
+                lowerAll.contains("diproses") || lowerAll.contains("in the kitchen") ||
+                lowerAll.contains("preparing") -> 15
             else -> (stage * 100) / 3
         }
     }
