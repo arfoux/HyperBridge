@@ -696,6 +696,13 @@ class NotificationReaderService : NotificationListenerService() {
                 val info = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim()
                 effectiveText = big?.takeIf { it.isNotEmpty() } ?: sub?.takeIf { it.isNotEmpty() } ?: info ?: ""
             }
+            // Grab live-activity RV-only: extras null semua -> judul generik (BUKAN label
+            // app "Grab"); isi stage/ETA datang dari korpus RV via translator/async.
+            if (effectiveTitle.isEmpty() && sbn.packageName == "com.grabtaxi.passenger" &&
+                extras.getBoolean("android.contains.customView", false)
+            ) {
+                effectiveTitle = context.getString(R.string.type_delivery)
+            }
 
             // [LOGIC] 2. State Preservation
             val key = sbn.key
@@ -817,6 +824,38 @@ class NotificationReaderService : NotificationListenerService() {
             removalJobs.remove(effectiveKey)
             var isUpdate = activeIslands.containsKey(effectiveKey)
             var bridgeId = sbn.key.hashCode()
+
+            // DELIVERY satu order = satu pill: update stage (key baru) menimpa island
+            // order aktif yg sama (liveId Grab=nempel per-pkg, Shopee=liveId), bukan nambah pill.
+            // "Selamat menikmati"/"is here" = order selesai -> island lama boleh tutup.
+            if (!isUpdate && type == NotificationType.DELIVERY) {
+                val grabKey = if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}" else null
+                val liveId = extras.getString("extra_live_activity_id")
+                val orderSig = grabKey ?: liveId?.takeIf { it.isNotEmpty() }
+                if (orderSig != null) {
+                    val existingEntry = activeIslands.entries.find {
+                        it.value.type == NotificationType.DELIVERY && it.value.packageName == sbn.packageName &&
+                            (it.value.subText == orderSig || (grabKey != null && it.value.subText == grabKey))
+                    }
+                    if (existingEntry != null && existingEntry.key != key) {
+                        val oldKey = existingEntry.key
+                        bridgeId = existingEntry.value.id
+                        effectiveKey = oldKey
+                        isUpdate = true
+
+                        activeIslands.remove(oldKey)
+                        activeTranslations.remove(oldKey)
+                        timeoutJobs[oldKey]?.cancel()
+                        timeoutJobs.remove(oldKey)
+                        removalJobs[oldKey]?.cancel()
+                        removalJobs.remove(oldKey)
+
+                        effectiveKey = key
+                        activeTranslations[effectiveKey] = bridgeId
+                        reverseTranslations[bridgeId] = effectiveKey
+                    }
+                }
+            }
 
             if (!isUpdate && type == NotificationType.MESSAGE && sbn.groupKey != null) {
                 val existingEntry = activeIslands.entries.find {
@@ -993,10 +1032,16 @@ class NotificationReaderService : NotificationListenerService() {
             if (debugLogEnabled()) Log.i(TAG, " POSTING Island -> ID: $bridgeId, Type: $type, FinalTitle: '$effectiveTitle', FinalText: '$effectiveText'")
             postStandardNotification(sbn, bridgeId, data, shouldAlertOnce)
 
+            // subText menyimpan signature order DELIVERY (liveId / grab:pkg) agar
+            // stage berikutnya menimpa island yg sama (satu order = satu pill).
+            val deliveryOrderSig = if (type == NotificationType.DELIVERY) {
+                extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
+                    ?: if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}" else ""
+            } else ""
             activeIslands[effectiveKey] = ActiveIsland(
                 id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                 packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
-                subText = "", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                subText = deliveryOrderSig, lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
                 fastHash = deliveryFastHash
             )
             updatePermanentIsland()
@@ -1006,13 +1051,17 @@ class NotificationReaderService : NotificationListenerService() {
             // order yang sama bila stage ini tak bawa waktu). Cek gambar di background:
             // hanya update bila ketemu waktu BARU; miss = biarkan pill apa adanya.
             // GRAB: extras null semua — pill awal generik, isi penuh SELALU dari RV async.
+            // ASYNC SKIP: notif teks biasa (contentView null, mis. Transaction) tak punya
+            // RV — inflate pasti miss; jangan buang kerja background (bukti: corpus='null').
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
+                val hasRv = sbn.notification.contentView != null || sbn.notification.bigContentView != null ||
+                    sbn.notification.headsUpContentView != null
                 val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
                 // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right
                 val isEtaEmpty = data.jsonParam.contains("\"textInfo\":{\"title\":\"\"") && data.jsonParam.contains("imageTextInfoRight")
                 val isGrabRvOnly = sbn.packageName == "com.grabtaxi.passenger" &&
                     effectiveTitle.isEmpty() && effectiveText.isEmpty()
-                if (isEtaEmpty || !hasEta || isGrabRvOnly) {
+                if ((isEtaEmpty || !hasEta || isGrabRvOnly) && hasRv) {
                     val sbnKey = sbn.key
                     val capturedSbn = sbn
                     val capturedPicKey = picKey

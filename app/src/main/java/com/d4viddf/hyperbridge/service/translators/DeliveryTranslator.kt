@@ -29,6 +29,9 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         private val lastEtaByOrder = java.util.concurrent.ConcurrentHashMap<String, String>()
         /** Order terakhir per package — agar repost tanpa liveId tetap nempel ke order yang sama. */
         private val lastOrderByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
+        /** Cache ikon app Grab (PackageManager) — dibaca sekali per proses. */
+        private var grabIconCached = false
+        private var grabIconBitmap: Bitmap? = null
         /** Kunci order selesai: stage 3 / "selamat menikmati" menghapus ingatan ETA order itu. */
         private fun isFinishedStage(stage: Int?, corpus: String): Boolean {
             if (stage != null && stage >= 3) return true
@@ -52,6 +55,19 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         } catch (_: Exception) {
             getDrawablePicture(key, resId)
         }
+    }
+
+    /** Ikon app resmi Grab (PackageManager, cache per proses) — pill Grab live-activity
+     * tak bawa largeIcon sama sekali; smallIcon-nya resource internal yg tak terbaca.
+     * Shopee tak tersentuh: Shopee tak bawa largeIcon -> tetap logo ShopeeFood hardcode. */
+    private fun grabAppIcon(): Bitmap? {
+        if (grabIconCached) return grabIconBitmap
+        grabIconCached = true
+        grabIconBitmap = try {
+            val d = context.packageManager.getApplicationIcon("com.grabtaxi.passenger")
+            d.toBitmap()
+        } catch (_: Exception) { null }
+        return grabIconBitmap
     }
 
     private val preferences = AppPreferences(context)
@@ -195,8 +211,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 3. Pictures: logo resto ASLI per order bila ada (Grab Transaction largeIcon
         // 98x98 logo Burjo dst; Shopee largeIcon), fallback logo ShopeeFood hardcode.
         // Nol inflate — largeIcon sudah tersedia di extras.
+        // GRAB LIVE-ACTIVITY: tak bawa largeIcon SAMA SEKALI (null di dump) — pakai
+        // IKON APP RESMI Grab dari PackageManager (bukan logo Shopee!), cache per proses.
+        // Shopee tak bawa largeIcon -> grabAppIcon() null -> tetap logo ShopeeFood hardcode.
+        // Grab live-activity selalu null -> ikon app Grab resmi. Grab Transaction bawa
+        // largeIcon logo resto -> logo resto asli (kiri pill + cover shade).
         val logoKey = "${picKey}_logo"
+        val isGrab = sbn.packageName == "com.grabtaxi.passenger"
         val orderLogo = sbn.notification.getLargeIcon()?.let { loadIconBitmap(it, sbn.packageName) }
+            ?: (if (isGrab) grabAppIcon() else null)
         if (orderLogo != null) {
             builder.addPicture(HyperPicture(logoKey, orderLogo))
         } else {
