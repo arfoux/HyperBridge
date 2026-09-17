@@ -15,9 +15,11 @@ import com.d4viddf.hyperbridge.models.theme.HyperTheme
 import io.github.d4viddf.hyperisland_kit.HyperAction
 import io.github.d4viddf.hyperisland_kit.HyperIslandNotification
 import io.github.d4viddf.hyperisland_kit.HyperPicture
+import io.github.d4viddf.hyperisland_kit.models.CircularProgressInfo
 import io.github.d4viddf.hyperisland_kit.models.ImageTextInfoLeft
 import io.github.d4viddf.hyperisland_kit.models.ImageTextInfoRight
 import io.github.d4viddf.hyperisland_kit.models.PicInfo
+import io.github.d4viddf.hyperisland_kit.models.ProgressTextInfo
 import io.github.d4viddf.hyperisland_kit.models.TextInfo
 
 class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslator(context, repo) {
@@ -190,10 +192,16 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
 
-        // 3. Pictures: logo ShopeeFood hardcode (drawable hasil dump order asli, stabil
-        // antar order) untuk small island + cover. Nol ekstrak RemoteViews.
+        // 3. Pictures: logo resto ASLI per order bila ada (Grab Transaction largeIcon
+        // 98x98 logo Burjo dst; Shopee largeIcon), fallback logo ShopeeFood hardcode.
+        // Nol inflate — largeIcon sudah tersedia di extras.
         val logoKey = "${picKey}_logo"
-        builder.addPicture(squarePicture(logoKey, R.drawable.delivery_logo_food))
+        val orderLogo = sbn.notification.getLargeIcon()?.let { loadIconBitmap(it, sbn.packageName) }
+        if (orderLogo != null) {
+            builder.addPicture(HyperPicture(logoKey, orderLogo))
+        } else {
+            builder.addPicture(squarePicture(logoKey, R.drawable.delivery_logo_food))
+        }
         val isRealClonePost = extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
         val coverKey = if (isRealClonePost) {
             val testBanner = try {
@@ -258,25 +266,45 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Island: kiri logo motor doang (tanpa teks), kanan ETA ringkas "14mnt".
-        // Shade tetap lengkap via setBaseInfo; pill atas = logo + menit saja.
+        // 7. Island SESAK-ASSET: kiri logo + judul stage, kanan ETA ringkas,
+        // + lingkaran progres stage di kanan (pola resmi kit: Template 7 Upload).
+        // Pill tetap pendek (tanpa teks panjang); shade tetap lengkap via setBaseInfo.
         // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
         // Kosong = pinjam ETA terakhir order yang sama (shownEta).
         val etaShort = shownEta.replace(" menit", "mnt")
+        val islandPct = progressPercent ?: percent.takeIf { hasProgress } ?: ((stage ?: 0) * 100 / 3)
+        // Judul stage ringkas buat kiri pill (tanpa teks panjang resto).
+        // Grab tak bawa judul ("Food & Delivery" generik) — pakai kanan generik juga.
+        val isGrabGeneric = sbn.packageName == "com.grabtaxi.passenger" && title == context.getString(R.string.type_delivery)
+        val stageTitle = if (isGrabGeneric) "" else title.take(24)
         builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
+        // Kiri pill = logo resto asli bila ada (orderLogo), sonst motor.
+        // Kanan = pin tujuan; lingkaran progres nempel di kiri (pola kit Template 7).
+        val leftPicKey = if (orderLogo != null) logoKey else "delivery_mini_motor"
+        // Aset garis 3-ikon didaftarkan ulang sebagai aset island (sudah ada di shade).
+        builder.addPicture(squarePicture("delivery_island_stage", R.drawable.delivery_icon_stage))
+        builder.addPicture(squarePicture("delivery_island_pin", R.drawable.delivery_icon_pin))
         builder.setBigIslandInfo(
             left = ImageTextInfoLeft(
                 type = 1,
-                picInfo = PicInfo(type = 1, pic = "delivery_mini_motor"),
-                textInfo = TextInfo("", "")
+                picInfo = PicInfo(type = 1, pic = leftPicKey),
+                textInfo = TextInfo(stageTitle, etaShort.ifEmpty { null })
             ),
             right = ImageTextInfoRight(
                 type = 2,
-                picInfo = PicInfo(type = 1, pic = "hidden_pixel"),
-                textInfo = TextInfo(etaShort, "")
+                picInfo = PicInfo(type = 1, pic = "delivery_island_pin"),
+                textInfo = TextInfo(etaShort, null)
+            ),
+            progressText = ProgressTextInfo(
+                progressInfo = CircularProgressInfo(
+                    progress = islandPct.coerceIn(0, 100),
+                    colorReach = themeColor,
+                    isCCW = true
+                ),
+                textInfo = null
             )
         )
-        builder.setSmallIsland("delivery_mini_motor")
+        builder.setSmallIslandCircularProgress(leftPicKey, islandPct.coerceIn(0, 100), themeColor, isCCW = true)
         builder.setIslandConfig(highlightColor = themeColor, expandedTimeMs = config.floatTimeout)
         builder.setHideDeco(true).setReopen(true).setShowSmallIcon(true)
 

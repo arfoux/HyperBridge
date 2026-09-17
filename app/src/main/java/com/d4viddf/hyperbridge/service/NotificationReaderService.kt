@@ -1461,7 +1461,9 @@ class NotificationReaderService : NotificationListenerService() {
             val ch = notification.channelId ?: ""
             if (ch.contains("live_activity", ignoreCase = true)) return false
             if (ch.equals("Transaction", ignoreCase = true)) {
-                val c = "$title $text".lowercase()
+                val t = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                val b = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+                val c = "$t $b".lowercase()
                 if (c.contains("preparing your order") || c.contains("in the kitchen") ||
                     c.contains("is here") || c.contains("on the way") || c.contains("on its way") ||
                     c.contains("arriving") || c.contains("picked up")) return false
