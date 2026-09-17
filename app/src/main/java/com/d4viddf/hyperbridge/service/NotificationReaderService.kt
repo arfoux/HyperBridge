@@ -701,7 +701,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (effectiveTitle.isEmpty() && sbn.packageName == "com.grabtaxi.passenger" &&
                 extras.getBoolean("android.contains.customView", false)
             ) {
-                effectiveTitle = context.getString(R.string.type_delivery)
+                effectiveTitle = getString(R.string.type_delivery)
             }
 
             // [LOGIC] 2. State Preservation
