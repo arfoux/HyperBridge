@@ -30,8 +30,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         /** Order terakhir per package — agar repost tanpa liveId tetap nempel ke order yang sama. */
         private val lastOrderByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
         /** Cache ikon app Grab (PackageManager) — dibaca sekali per proses. */
-        private var grabIconCached = false
-        private var grabIconBitmap: Bitmap? = null
         /** Kunci order selesai: stage 3 / "selamat menikmati" menghapus ingatan ETA order itu. */
         private fun isFinishedStage(stage: Int?, corpus: String): Boolean {
             if (stage != null && stage >= 3) return true
@@ -57,17 +55,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
     }
 
-    /** Ikon app resmi Grab (PackageManager, cache per proses) — pill Grab live-activity
-     * tak bawa largeIcon sama sekali; smallIcon-nya resource internal yg tak terbaca.
-     * Shopee tak tersentuh: Shopee tak bawa largeIcon -> tetap logo ShopeeFood hardcode. */
-    private fun grabAppIcon(): Bitmap? {
-        if (grabIconCached) return grabIconBitmap
-        grabIconCached = true
-        grabIconBitmap = try {
-            val d = context.packageManager.getApplicationIcon("com.grabtaxi.passenger")
-            d.toBitmap()
-        } catch (_: Exception) { null }
-        return grabIconBitmap
+    /** Motor hijau Grab (hardcode dari APK Grab ic_grabnow_bike, 1:1 Shopee delivery_icon_driver).
+     * Dipakai untuk SEMUA aset motor Grab: kiri pill, garis progres, small island.
+     * Shopee tak tersentuh (tetap delivery_icon_driver oranye). */
+    private fun grabBikePicture(key: String): HyperPicture {
+        return squarePicture(key, R.drawable.grab_icon_bike)
     }
 
     private val preferences = AppPreferences(context)
@@ -212,16 +204,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 98x98 logo Burjo dst; Shopee largeIcon), fallback logo ShopeeFood hardcode.
         // Nol inflate — largeIcon sudah tersedia di extras.
         // GRAB LIVE-ACTIVITY: tak bawa largeIcon SAMA SEKALI (null di dump) — pakai
-        // IKON APP RESMI Grab dari PackageManager (bukan logo Shopee!), cache per proses.
-        // Shopee tak bawa largeIcon -> grabAppIcon() null -> tetap logo ShopeeFood hardcode.
-        // Grab live-activity selalu null -> ikon app Grab resmi. Grab Transaction bawa
-        // largeIcon logo resto -> logo resto asli (kiri pill + cover shade).
+        // logo GrabFood hardcode (motor hijau ic_grabnow_bike), 1:1 logo ShopeeFood.
+        // Shopee tak bawa largeIcon -> tetap logo ShopeeFood hardcode.
         val logoKey = "${picKey}_logo"
         val isGrab = sbn.packageName == "com.grabtaxi.passenger"
         val orderLogo = sbn.notification.getLargeIcon()?.let { loadIconBitmap(it, sbn.packageName) }
-            ?: (if (isGrab) grabAppIcon() else null)
         if (orderLogo != null) {
             builder.addPicture(HyperPicture(logoKey, orderLogo))
+        } else if (isGrab) {
+            builder.addPicture(grabBikePicture(logoKey))
         } else {
             builder.addPicture(squarePicture(logoKey, R.drawable.delivery_logo_food))
         }
@@ -271,13 +262,19 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         if (stage != null) {
             builder.setStepProgress(stage, 3, themeColor)
             // Ikon garis hardcode (drawable hasil dump, stabil antar order) — nol inflate.
-            builder.addPicture(squarePicture("delivery_prog_driver", R.drawable.delivery_icon_driver))
+            // Grab pakai motor hijau sendiri (grab_icon_bike), Shopee motor oranye.
+            val progDriverKey = "delivery_prog_driver"
+            if (isGrab) {
+                builder.addPicture(grabBikePicture(progDriverKey))
+            } else {
+                builder.addPicture(squarePicture(progDriverKey, R.drawable.delivery_icon_driver))
+            }
             builder.addPicture(squarePicture("delivery_prog_stage", R.drawable.delivery_icon_stage))
             builder.addPicture(squarePicture("delivery_prog_destination", R.drawable.delivery_icon_pin))
             builder.setProgressBar(
                 progress = progressPercent ?: ((stage * 100) / 3),
                 color = themeColor,
-                picForwardKey = "delivery_prog_driver",
+                picForwardKey = progDriverKey,
                 picMiddleKey = "delivery_prog_stage",
                 picEndKey = "delivery_prog_destination"
             )
@@ -300,10 +297,17 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Grab tak bawa judul ("Food & Delivery" generik) — pakai kanan generik juga.
         val isGrabGeneric = sbn.packageName == "com.grabtaxi.passenger" && title == context.getString(R.string.type_delivery)
         val stageTitle = if (isGrabGeneric) "" else title.take(24)
-        builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
-        // Kiri pill = logo resto asli bila ada (orderLogo), sonst motor.
+        // Kiri pill = logo resto asli bila ada (orderLogo); Grab tanpa largeIcon =
+        // motor hijau Grab; Shopee tanpa largeIcon = motor oranye Shopee.
         // Kanan = pin tujuan; lingkaran progres nempel di kiri (pola kit Template 7).
-        val leftPicKey = if (orderLogo != null) logoKey else "delivery_mini_motor"
+        val leftPicKey = if (orderLogo != null) logoKey
+            else if (isGrab) "delivery_mini_bike"
+            else "delivery_mini_motor"
+        if (isGrab && orderLogo == null) {
+            builder.addPicture(grabBikePicture("delivery_mini_bike"))
+        } else if (!isGrab && orderLogo == null) {
+            builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
+        }
         // Aset garis 3-ikon didaftarkan ulang sebagai aset island (sudah ada di shade).
         builder.addPicture(squarePicture("delivery_island_stage", R.drawable.delivery_icon_stage))
         builder.addPicture(squarePicture("delivery_island_pin", R.drawable.delivery_icon_pin))

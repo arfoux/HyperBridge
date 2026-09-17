@@ -827,7 +827,6 @@ class NotificationReaderService : NotificationListenerService() {
 
             // DELIVERY satu order = satu pill: update stage (key baru) menimpa island
             // order aktif yg sama (liveId Grab=nempel per-pkg, Shopee=liveId), bukan nambah pill.
-            // "Selamat menikmati"/"is here" = order selesai -> island lama boleh tutup.
             if (!isUpdate && type == NotificationType.DELIVERY) {
                 val grabKey = if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}" else null
                 val liveId = extras.getString("extra_live_activity_id")
@@ -835,22 +834,26 @@ class NotificationReaderService : NotificationListenerService() {
                 if (orderSig != null) {
                     val existingEntry = activeIslands.entries.find {
                         it.value.type == NotificationType.DELIVERY && it.value.packageName == sbn.packageName &&
-                            (it.value.subText == orderSig || (grabKey != null && it.value.subText == grabKey))
+                            it.value.subText == orderSig
                     }
                     if (existingEntry != null && existingEntry.key != key) {
                         val oldKey = existingEntry.key
                         bridgeId = existingEntry.value.id
-                        effectiveKey = oldKey
                         isUpdate = true
 
-                        activeIslands.remove(oldKey)
+                        // Kunci LAMA dipertahankan (jangan pindah ke key baru): update stage
+                        // Grab/Shopee ganti key tiap post — pindah key = island lama yatim.
                         activeTranslations.remove(oldKey)
                         timeoutJobs[oldKey]?.cancel()
                         timeoutJobs.remove(oldKey)
                         removalJobs[oldKey]?.cancel()
                         removalJobs.remove(oldKey)
+                        // Hapus notif bridge lama BILA id berubah (jangan tumpuk dua pill).
+                        if (existingEntry.value.id != bridgeId) {
+                            try { NotificationManagerCompat.from(this).cancel(existingEntry.value.id) } catch (_: Exception) {}
+                        }
 
-                        effectiveKey = key
+                        effectiveKey = oldKey
                         activeTranslations[effectiveKey] = bridgeId
                         reverseTranslations[bridgeId] = effectiveKey
                     }
@@ -1269,26 +1272,29 @@ class NotificationReaderService : NotificationListenerService() {
                 (hasCustomView && channelId.contains("SHOPEE", ignoreCase = true) && hasFoodKeyword && !isPromo)
             )
         val isShopeeFoodFallback = isShopee && channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo
-        // --- GRAB ELIGIBLE CHECK (observed 2026-09-17, order Burjo Titik Kumpul) ---
+                // --- GRAB ELIGIBLE CHECK (observed 2026-09-17, order Burjo Titik Kumpul) ---
         // Dua jalur sejajar:
         //  (a) live_activity_channel_01 + customView, extras NULL — isi di RemoteViews (dibaca async).
         //  (b) channel Transaction + BigTextStyle, extras LENGKAP ("In the kitchen",
         //      "Burjo ... is preparing your order...") — stage Grab, 1:1 Shopee extras.
         // Promo ("Offers From Grab": GrabMore/Bintang Lima) + Feedback + CALL dikecualikan.
+        // Operasional ("Photo upload successful" / "Thanks for helping out your driver!")
+        // BUKAN stage — wajib pola status order, kata "driver" doang tidak cukup.
         val isGrab = sbn.packageName == "com.grabtaxi.passenger"
         val isGrabLiveEligible = isGrab && hasCustomView &&
             (channelId.contains("live_activity", ignoreCase = true) || channelId.contains("grabfood", ignoreCase = true) || channelId.contains("food", ignoreCase = true))
         val isGrabPromoChannel = channelId.contains("offers", ignoreCase = true) ||
             channelId.contains("feedback", ignoreCase = true)
-        val hasGrabKeyword = combined.contains("preparing your order") || combined.contains("in the kitchen") ||
+        val hasGrabStage = combined.contains("preparing your order") || combined.contains("in the kitchen") ||
             combined.contains("is here") || combined.contains("on the way") || combined.contains("on its way") ||
-            combined.contains("arriving") || combined.contains("picked up") || combined.contains("your order") ||
-            combined.contains("driver") || combined.contains("resto") || combined.contains("restaurant")
+            combined.contains("arriving") || combined.contains("picked up") || combined.contains("heading to") ||
+            combined.contains("heading your way") || combined.contains("delivered") || combined.contains("order complete")
         val isGrabPromo = combined.contains("grabmore") || combined.contains("diskon ongkir") ||
             combined.contains("bintang lima") || combined.contains("verdict") ||
-            combined.contains("tell us what you think")
+            combined.contains("tell us what you think") || combined.contains("photo upload") ||
+            combined.contains("thanks for helping")
         val isGrabFoodEligible = isGrabLiveEligible ||
-            (isGrab && channelId.equals("Transaction", ignoreCase = true) && hasGrabKeyword && !isGrabPromo && !isGrabPromoChannel)
+            (isGrab && channelId.equals("Transaction", ignoreCase = true) && hasGrabStage && !isGrabPromo && !isGrabPromoChannel)
 
         val title = resolveTitle(sbn)
         val text = resolveText(extras)
@@ -1513,9 +1519,12 @@ class NotificationReaderService : NotificationListenerService() {
                 val t = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
                 val b = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
                 val c = "$t $b".lowercase()
+                // Wajib pola status order (ketat, 1:1 detect) — "driver"/"your order" doang
+                // tidak cukup (bukti: "Photo upload successful" nyasar).
                 if (c.contains("preparing your order") || c.contains("in the kitchen") ||
                     c.contains("is here") || c.contains("on the way") || c.contains("on its way") ||
-                    c.contains("arriving") || c.contains("picked up")) return false
+                    c.contains("arriving") || c.contains("picked up") || c.contains("heading to") ||
+                    c.contains("heading your way") || c.contains("delivered") || c.contains("order complete")) return false
             }
         }
         // ShopeeFood via RemoteViews juga eligible (fallback jika tanpa liveId tapi customView + food keyword)
