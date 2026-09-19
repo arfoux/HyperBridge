@@ -605,6 +605,18 @@ class NotificationReaderService : NotificationListenerService() {
         return false
     }
 
+    /** Korpus teks satu notif (title/text/big/sub/info) untuk cek marker tuntas. */
+    private fun sbnCorpus(s: StatusBarNotification): String {
+        val e = s.notification.extras
+        return listOf(
+            e.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+            e.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
+            e.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+            e.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+            e.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+        ).joinToString(" ")
+    }
+
     /** "N menit" -> N. Selain itu (jam "20:25", kosong) -> null. */
     private fun etaMinutesOrNull(etaText: String?): Int? {
         val t = etaText?.trim().orEmpty()
@@ -936,6 +948,26 @@ class NotificationReaderService : NotificationListenerService() {
                 activeIslands.values.any { it.type == NotificationType.DELIVERY && it.packageName == sbn.packageName }
             ) {
                 dismissDeliveryPills(sbn.packageName)
+            }
+            // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
+            // lain ber-marker tuntas, postingan stage basi ini gugur — dismiss + skip.
+            // Bukti: rating Feedback diproses dulu (tak ada pill), lalu "on the way" hidup lagi.
+            if (type == NotificationType.DELIVERY) {
+                val siblingFinished = try {
+                    activeNotifications?.any { other ->
+                        other.packageName == sbn.packageName && other.key != key &&
+                            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(sbnCorpus(other))
+                    } == true
+                } catch (_: Exception) { false }
+                if (siblingFinished) {
+                    dismissDeliveryPills(sbn.packageName)
+                    try {
+                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
+                    } catch (_: Exception) {}
+                    cleanupCache(key)
+                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key")
+                    return
+                }
             }
 
             // --- LAYERED TRIGGERS LOGIC — fallback: Shopee/Grab DELIVERY eligible auto-allow ---
