@@ -48,7 +48,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -90,6 +92,10 @@ class NotificationReaderService : NotificationListenerService() {
     private val activeTranslations = ConcurrentHashMap<String, Int>()
     private val reverseTranslations = ConcurrentHashMap<Int, String>()
     private val processingJobs = ConcurrentHashMap<String, Job>()
+    // Rantai per-paket: notif satu paket diproses berurutan (bukan paralel).
+    // Tanpa ini dua stage delivery (key A + key B) lolos dedup/collapse bersamaan
+    // karena check-then-act tidak atomik -> double pill (bukti: logcat 07:24:19).
+    private val processingChain = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
     private lateinit var permanentIslandManager: PermanentIslandManager
@@ -668,7 +674,17 @@ class NotificationReaderService : NotificationListenerService() {
             }
 
             processingJobs[it.key]?.cancel()
+            val prev = processingChain[it.packageName]
             val job = serviceScope.launch {
+                // Tunggu giliran paket ini (serial, bukan paralel) agar dedup/collapse
+                // melihat state terbaru. Batal prev = lanjut langsung; batal diri = stop.
+                if (prev != null) {
+                    try {
+                        prev.join()
+                    } catch (_: Exception) {
+                        currentCoroutineContext().ensureActive()
+                    }
+                }
                 val isJunk = isJunkNotification(it)
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
                 // REAL-clone juga jangan dianggap junk: marker + liveId + title/text selalu non-empty.
@@ -680,7 +696,11 @@ class NotificationReaderService : NotificationListenerService() {
                 processStandardNotification(it)
             }
             processingJobs[it.key] = job
-            job.invokeOnCompletion { processingJobs.remove(sbn.key) }
+            processingChain[it.packageName] = job
+            job.invokeOnCompletion {
+                processingJobs.remove(sbn.key)
+                processingChain.remove(sbn.packageName, job)
+            }
         }
     }
 

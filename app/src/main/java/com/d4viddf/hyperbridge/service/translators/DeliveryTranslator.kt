@@ -200,18 +200,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
 
-        // 3. Pictures: logo resto ASLI per order bila ada (Grab Transaction largeIcon
-        // 98x98 logo Burjo dst; Shopee largeIcon), fallback logo ShopeeFood hardcode.
-        // Nol inflate — largeIcon sudah tersedia di extras.
-        // GRAB LIVE-ACTIVITY: tak bawa largeIcon SAMA SEKALI (null di dump) — pakai
-        // logo GrabFood hardcode (motor hijau ic_grabnow_bike), 1:1 logo ShopeeFood.
-        // Shopee tak bawa largeIcon -> tetap logo ShopeeFood hardcode.
+        // 3. Pictures: Grab SELALU motor hijau hardcode (tanpa load largeIcon —
+        // hemat decode bitmap per update). Shopee: logo ShopeeFood hardcode
+        // (largeIcon Shopee tak pernah ada di dump, jadi Shopee juga hardcode).
         val logoKey = "${picKey}_logo"
         val isGrab = sbn.packageName == "com.grabtaxi.passenger"
-        val orderLogo = sbn.notification.getLargeIcon()?.let { loadIconBitmap(it, sbn.packageName) }
-        if (orderLogo != null) {
-            builder.addPicture(HyperPicture(logoKey, orderLogo))
-        } else if (isGrab) {
+        if (isGrab) {
             builder.addPicture(grabBikePicture(logoKey))
         } else {
             builder.addPicture(squarePicture(logoKey, R.drawable.delivery_logo_food))
@@ -297,15 +291,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Grab tak bawa judul ("Food & Delivery" generik) — pakai kanan generik juga.
         val isGrabGeneric = sbn.packageName == "com.grabtaxi.passenger" && title == context.getString(R.string.type_delivery)
         val stageTitle = if (isGrabGeneric) "" else title.take(24)
-        // Kiri pill = logo resto asli bila ada (orderLogo); Grab tanpa largeIcon =
-        // motor hijau Grab; Shopee tanpa largeIcon = motor oranye Shopee.
+        // Kiri pill = logoKey (Grab = motor hijau hardcode, Shopee = logo hardcode).
         // Kanan = pin tujuan; lingkaran progres nempel di kiri (pola kit Template 7).
-        val leftPicKey = if (orderLogo != null) logoKey
-            else if (isGrab) "delivery_mini_bike"
-            else "delivery_mini_motor"
-        if (isGrab && orderLogo == null) {
+        val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"
+        if (isGrab) {
             builder.addPicture(grabBikePicture("delivery_mini_bike"))
-        } else if (!isGrab && orderLogo == null) {
+        } else {
             builder.addPicture(squarePicture("delivery_mini_motor", R.drawable.delivery_icon_driver))
         }
         // Aset garis 3-ikon didaftarkan ulang sebagai aset island (sudah ada di shade).
