@@ -520,6 +520,20 @@ class NotificationReaderService : NotificationListenerService() {
         updatePermanentIsland()
     }
 
+    /** Bunuh semua pill DELIVERY milik satu paket (order tuntas / ganti key). */
+    private fun dismissDeliveryPills(pkg: String) {
+        val stale = activeIslands.entries.filter {
+            it.value.type == NotificationType.DELIVERY && it.value.packageName == pkg
+        }
+        for ((staleKey, island) in stale) {
+            try {
+                NotificationManagerCompat.from(this).cancel(island.id)
+            } catch (_: Exception) {}
+            cleanupCache(staleKey)
+        }
+        if (stale.isNotEmpty() && debugLogEnabled()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+    }
+
     private fun handlePostNotificationSideEffects(originalKey: String, bridgeId: Int, config: IslandConfig, type: NotificationType, isLiveUpdate: Boolean, sbn: StatusBarNotification? = null, title: String = "", text: String = "") {
         // 1. Remove original if enabled (EXCEPT for Media)
         if (config.removeOriginalNotification == true && type != NotificationType.MEDIA && type != NotificationType.CALL) {
@@ -819,6 +833,58 @@ class NotificationReaderService : NotificationListenerService() {
                 }
             }
 
+            // --- DELIVERY FINISHED + SINGLE-PILL DEDUP ---
+            // Order tuntas ("Selamat menikmati"/"selesai"/"delivered"): dismiss pill yang
+            // ada, jangan post pill baru. Tanpa ini pill nangkring + double (key lama stage
+            // jalan + key baru stage selesai hidup bersamaan, yg lama stuck "tidak selesai").
+            // Signature order (liveId Shopee / grab:pkg) dikecualikan dari dedup agar
+            // collapse mulus di bawah (satu order = satu pill, reuse bridgeId) tidak rusak.
+            val deliveryCorpus = listOf(
+                effectiveTitle, effectiveText,
+                extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+                extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+                extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+            ).joinToString(" ")
+            if (type == NotificationType.DELIVERY &&
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(deliveryCorpus)
+            ) {
+                dismissDeliveryPills(sbn.packageName)
+                // Update same-key yang berubah jadi SELESAI tapi pill-nya belum ke-track
+                // (bridgeId deterministik dari key): pastikan ikut dicancel.
+                try {
+                    NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
+                } catch (_: Exception) {}
+                cleanupCache(key)
+                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED dismiss pkg=${sbn.packageName} key=$key title='$effectiveTitle'")
+                return
+            }
+            // SELESAI yang terdeteksi sbg tipe lain (rating/order-tuntas beda channel):
+            // pill delivery lama tetap dibunuh agar tidak nyangkut. Notif saat ini tetap
+            // diproses normal (rating muncul sekali, bukan double).
+            if (type != NotificationType.DELIVERY &&
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
+            ) {
+                dismissDeliveryPills(sbn.packageName)
+            }
+            if (type == NotificationType.DELIVERY) {
+                // Single-pill: stage update via key baru selagi key lama masih hidup
+                // -> tanpa collapse ini muncul double pill (satu stuck stage lama).
+                val incomingSig: String? = if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}"
+                    else extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
+                val dupes = activeIslands.entries.filter {
+                    it.value.type == NotificationType.DELIVERY &&
+                        it.value.packageName == sbn.packageName && it.key != key &&
+                        !(incomingSig != null && it.value.subText == incomingSig)
+                }
+                for ((dupeKey, island) in dupes) {
+                    try {
+                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
+                    } catch (_: Exception) {}
+                    cleanupCache(dupeKey)
+                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-DEDUP cancel $dupeKey keep $key")
+                }
+            }
+
             var effectiveKey = key
             removalJobs[effectiveKey]?.cancel()
             removalJobs.remove(effectiveKey)
@@ -1082,6 +1148,9 @@ class NotificationReaderService : NotificationListenerService() {
                             // Tetap async setelah pill — pill tidak delay.
                             val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(applicationContext, capturedSbn)
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
+                            // Jangan hidupkan lagi pill yang sudah di-dismiss
+                            // (mis. SELESAI datang dalam 80ms jeda async).
+                            if (!activeIslands.containsKey(capturedEffectiveKey)) return@launch
                             // GRAB RV-only: korpus RV = isi utama (stage/ETA/shade), update walau tanpa ETA.
                             // Shopee: hanya update bila ketemu waktu baru (pinjaman lama tetap tampil bila miss).
                             val isGrabUpdate = capturedSbn.packageName == "com.grabtaxi.passenger" && !rvCorpus.isNullOrBlank()

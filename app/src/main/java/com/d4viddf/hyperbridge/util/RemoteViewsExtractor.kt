@@ -40,6 +40,35 @@ object RemoteViewsExtractor {
         }
     }
 
+    /**
+     * Order selesai (bukan tiba-di-tujuan): pill harus di-dismiss, bukan di-post/update.
+     * "tiba" (sudah/telah tiba, Grab "is here") = masih tampil 100% penuh;
+     * "selesai"/"selamat menikmati"/"delivered" = order done -> dismiss agar tidak
+     * nangkring + anti double-pill (key lama stage jalan + key baru stage selesai).
+     * Sumber kebenaran tunggal — dipakai service sebelum post.
+     */
+    fun isDeliveryFinishedStrong(corpusRaw: String): Boolean {
+        val c = corpusRaw.lowercase()
+        return c.contains("selamat menikmati") ||
+            c.contains("pastikan pesananmu sudah sesuai") ||
+            c.contains("pesanan selesai") || c.contains("order selesai") ||
+            c.contains("pesanan telah selesai") || c.contains("order telah selesai") ||
+            c.contains("sudah diterima") || c.contains("pesanan diterima") ||
+            c.contains("beri penilaian") || c.contains("berikan penilaian") ||
+            c.contains("nilai pesanan") || c.contains("kasih rating") ||
+            c.contains("enjoy your meal") ||
+            c.contains("delivered") ||
+            c.contains("order complete") || c.contains("order completed") ||
+            c.contains("rate your") || c.contains("how was your")
+    }
+
+    /** Varian longgar khusus korpus DELIVERY (tambah "selesai"/"completed" generik). */
+    fun isDeliveryFinished(corpusRaw: String): Boolean {
+        if (isDeliveryFinishedStrong(corpusRaw)) return true
+        val c = corpusRaw.lowercase()
+        return c.contains("selesai") || c.contains("completed")
+    }
+
     /** Persen garis dari sub-stage: menuju resto masih awal (2/5), tiba = penuh. */
     fun deliveryPercent(stage: Int?, corpusRaw: String): Int? {
         if (stage == null) return null
