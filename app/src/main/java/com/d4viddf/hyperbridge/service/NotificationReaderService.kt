@@ -96,6 +96,9 @@ class NotificationReaderService : NotificationListenerService() {
     // Tanpa ini dua stage delivery (key A + key B) lolos dedup/collapse bersamaan
     // karena check-then-act tidak atomik -> double pill (bukti: logcat 07:24:19).
     private val processingChain = ConcurrentHashMap<String, Job>()
+    // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
+    // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
+    private val deliveryContentTime = ConcurrentHashMap<String, Long>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
     private lateinit var permanentIslandManager: PermanentIslandManager
@@ -517,6 +520,7 @@ class NotificationReaderService : NotificationListenerService() {
         val hyperId = activeTranslations[originalKey]
         activeIslands.remove(originalKey)
         activeTranslations.remove(originalKey)
+        deliveryContentTime.remove(originalKey)
         timeoutJobs[originalKey]?.cancel()
         timeoutJobs.remove(originalKey)
 
@@ -923,6 +927,14 @@ class NotificationReaderService : NotificationListenerService() {
                             it.value.subText == orderSig
                     }
                     if (existingEntry != null && existingEntry.key != key) {
+                        // Freshness: jangan biarkan stage LAMA menimpa stage BARU.
+                        // Shade/listing umumnya newest-first -> saat burst reprocess,
+                        // key lama (postTime lebih kecil) datang belakangan dan harus skip.
+                        val shownTime = deliveryContentTime[existingEntry.key]
+                        if (shownTime != null && sbn.postTime < shownTime) {
+                            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-STALE skip key=$key (older than shown) pkg=${sbn.packageName}")
+                            return
+                        }
                         val oldKey = existingEntry.key
                         bridgeId = existingEntry.value.id
                         isUpdate = true
@@ -1080,6 +1092,7 @@ class NotificationReaderService : NotificationListenerService() {
                     subText = "LiveUpdate", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
                     fastHash = deliveryFastHash
                 )
+                if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
                 updatePermanentIsland()
 
                 handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, true, sbn, effectiveTitle, effectiveText)
@@ -1133,6 +1146,7 @@ class NotificationReaderService : NotificationListenerService() {
                 subText = deliveryOrderSig, lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
                 fastHash = deliveryFastHash
             )
+            if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
             updatePermanentIsland()
 
             // --- DELIVERY ASYNC ETA (0ms pill) ---
