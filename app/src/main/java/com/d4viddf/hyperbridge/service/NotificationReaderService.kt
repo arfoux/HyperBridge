@@ -924,6 +924,7 @@ class NotificationReaderService : NotificationListenerService() {
             }
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
             val isTestNotif = extras.getBoolean("hyperbridge_test", false)
+            val isRealClonePost = extras.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false)
             if (isTestNotif) {
                 Log.w("HyperBridgeTest", "TEST pkg=${sbn.packageName} type=$type title='$effectiveTitle' text='$effectiveText' ch=${sbn.notification.channelId} tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
             } else {
@@ -1221,7 +1222,7 @@ class NotificationReaderService : NotificationListenerService() {
 
                 // User/sistem baru saja dismiss konten identik -> jangan post ulang.
                 // Test/clone dikecualikan agar replay stage di Test screen deterministik.
-                if (!isTestNotif && !isRealClone && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+                if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
                     if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                     return
                 }
@@ -1268,7 +1269,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
 
             // User/sistem baru saja dismiss konten identik -> jangan post ulang.
-            if (!isTestNotif && !isRealClone && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+            if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
                 if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                 return
             }
