@@ -99,9 +99,6 @@ class NotificationReaderService : NotificationListenerService() {
     // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
     // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
     private val deliveryContentTime = ConcurrentHashMap<String, Long>()
-    // Sinyal delivery lebih tua dari ini = basi (order tuntas tanpa notif tuntas).
-    // Order aktif selalu update jauh di bawah ini (Grab ganti key tiap stage).
-    private val DELIVERY_MAX_AGE_MS = 3 * 60 * 60 * 1000L
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
     private lateinit var permanentIslandManager: PermanentIslandManager
@@ -846,10 +843,6 @@ class NotificationReaderService : NotificationListenerService() {
             // --- DELIVERY FINISHED (sebelum gate tipe) ---
             // Order tuntas harus membunuh pill walau notif tuntasnya bertipe lain
             // (rating/promo yang tipenya dimatikan user) atau DELIVERY-nya dimatikan.
-            // Safety net umur: original lebih tua dari TTL = sinyal basi. Kasus nyata:
-            // Grab tuntas TANPA notif tuntas sama sekali (6 notif Transaction nangkring,
-            // tidak ada yang baru) -> pill nyangkut 70% selamanya. Pakai sbn.postTime
-            // (waktu sistem) agar reinstall/resync tak membangkitkan pill basi.
             val deliveryCorpus = listOf(
                 effectiveTitle, effectiveText,
                 extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
@@ -875,18 +868,6 @@ class NotificationReaderService : NotificationListenerService() {
                 activeIslands.values.any { it.type == NotificationType.DELIVERY && it.packageName == sbn.packageName }
             ) {
                 dismissDeliveryPills(sbn.packageName)
-            }
-            // Sinyal basi: order aktif selalu update < TTL; yang lebih tua = sudah tuntas diam-diam.
-            if (type == NotificationType.DELIVERY &&
-                System.currentTimeMillis() - sbn.postTime > DELIVERY_MAX_AGE_MS
-            ) {
-                dismissDeliveryPills(sbn.packageName)
-                try {
-                    NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
-                } catch (_: Exception) {}
-                cleanupCache(key)
-                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-STALE-AGE skip key=$key age=${System.currentTimeMillis() - sbn.postTime}ms pkg=${sbn.packageName}")
-                return
             }
 
             // --- LAYERED TRIGGERS LOGIC — fallback: Shopee/Grab DELIVERY eligible auto-allow ---
