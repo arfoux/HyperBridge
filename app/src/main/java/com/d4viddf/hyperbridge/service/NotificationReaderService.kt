@@ -99,6 +99,8 @@ class NotificationReaderService : NotificationListenerService() {
     // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
     // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
     private val deliveryContentTime = ConcurrentHashMap<String, Long>()
+    // Timer cek-tuntas berjangkar ETA: 1 job per pill delivery (custom path saja).
+    private val deliveryEtaJobs = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
     private lateinit var permanentIslandManager: PermanentIslandManager
@@ -521,6 +523,8 @@ class NotificationReaderService : NotificationListenerService() {
         activeIslands.remove(originalKey)
         activeTranslations.remove(originalKey)
         deliveryContentTime.remove(originalKey)
+        deliveryEtaJobs[originalKey]?.cancel()
+        deliveryEtaJobs.remove(originalKey)
         timeoutJobs[originalKey]?.cancel()
         timeoutJobs.remove(originalKey)
 
@@ -542,6 +546,70 @@ class NotificationReaderService : NotificationListenerService() {
             cleanupCache(staleKey)
         }
         if (stale.isNotEmpty() && debugLogEnabled()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+    }
+
+    // Pengecekan tuntas berjangkar ETA order itu sendiri (bukan angka tetap):
+    // sekali saat ETA tiba, lalu per 10 menit (maks ~6 jam), lalu berhenti diam-diam.
+    // Murah: 1 timer per order + 1 baca daftar notif per cek (tanpa inflate/polling app).
+    // Kriteria tutup: 1) teks tuntas = bukti keras; 2) sunyi melewati ETA+grace 30 mnt
+    // (order aktif pasti update — tiap update me-refresh deliveryContentTime).
+    // Original yang hilang = bukan urusan cek ini (bisa removeOriginal by-design);
+    // itu ranahnya onNotificationRemoved.
+    private fun scheduleDeliveryEtaCheck(trackedKey: String, etaMin: Int) {
+        deliveryEtaJobs[trackedKey]?.cancel()
+        deliveryEtaJobs[trackedKey] = serviceScope.launch {
+            try {
+                delay(etaMin.coerceIn(1, 240) * 60_000L)
+                repeat(36) {
+                    val island = activeIslands[trackedKey]
+                    if (island == null || island.type != NotificationType.DELIVERY) {
+                        deliveryEtaJobs.remove(trackedKey)
+                        return@launch
+                    }
+                    if (checkDeliveryFinishedSnapshot(trackedKey, island.packageName, etaMin)) {
+                        deliveryEtaJobs.remove(trackedKey)
+                        return@launch
+                    }
+                    delay(10 * 60_000L)
+                }
+                deliveryEtaJobs.remove(trackedKey)
+            } catch (_: Exception) {
+                deliveryEtaJobs.remove(trackedKey)
+            }
+        }
+    }
+
+    /** True bila pill ditutup (teks tuntas / sunyi). False = cek lagi 10 mnt. */
+    private suspend fun checkDeliveryFinishedSnapshot(trackedKey: String, pkg: String, etaMin: Int): Boolean {
+        val snapshot = try { activeNotifications?.toList() } catch (_: Exception) { null }
+        val tracked = snapshot?.firstOrNull { it.key == trackedKey } ?: return false
+        val ex = tracked.notification.extras
+        val corpus = listOf(
+            ex.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+            ex.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
+            ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+            ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+            ex.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+        ).joinToString(" ")
+        if (com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(corpus)) {
+            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ETA-DONE dismiss key=$trackedKey pkg=$pkg")
+            dismissDeliveryPills(pkg)
+            return true
+        }
+        val lastUpdate = deliveryContentTime[trackedKey] ?: 0L
+        if (lastUpdate > 0 && System.currentTimeMillis() - lastUpdate > (etaMin + 30) * 60_000L) {
+            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ETA-SILENCE dismiss key=$trackedKey pkg=$pkg etaMin=$etaMin")
+            dismissDeliveryPills(pkg)
+            return true
+        }
+        return false
+    }
+
+    /** "N menit" -> N. Selain itu (jam "20:25", kosong) -> null. */
+    private fun etaMinutesOrNull(etaText: String?): Int? {
+        val t = etaText?.trim().orEmpty()
+        if (!t.endsWith("menit", ignoreCase = true)) return null
+        return Regex("\\d+").find(t)?.value?.toIntOrNull()?.takeIf { it in 1..240 }
     }
 
     private fun handlePostNotificationSideEffects(originalKey: String, bridgeId: Int, config: IslandConfig, type: NotificationType, isLiveUpdate: Boolean, sbn: StatusBarNotification? = null, title: String = "", text: String = "") {
@@ -1150,6 +1218,14 @@ class NotificationReaderService : NotificationListenerService() {
                 fastHash = deliveryFastHash
             )
             if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
+            // Cek-tuntas berjangkar ETA (tanpa ETA = fallback 45 mnt). Dijadwal ulang
+            // bila async RV menemukan ETA asli. Custom path saja (native punya timeout sendiri).
+            if (type == NotificationType.DELIVERY) {
+                scheduleDeliveryEtaCheck(
+                    effectiveKey,
+                    etaMinutesOrNull(com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(deliveryCorpus)) ?: 45
+                )
+            }
             updatePermanentIsland()
 
             // --- DELIVERY ASYNC ETA (0ms pill) ---
@@ -1202,6 +1278,8 @@ class NotificationReaderService : NotificationListenerService() {
                                 activeIslands[capturedEffectiveKey]?.let { old ->
                                     activeIslands[capturedEffectiveKey] = old.copy(lastContentHash = updatedData.jsonParam.hashCode())
                                 }
+                                // ETA asli ketemu -> jadwal ulang cek-tuntas dengan jangkar yang benar.
+                                etaMinutesOrNull(rvEta)?.let { scheduleDeliveryEtaCheck(capturedEffectiveKey, it) }
                             } else {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA miss sbn=$sbnKey corpus='${rvCorpus?.take(160) ?: "null"}'")
                             }
