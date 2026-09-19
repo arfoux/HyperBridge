@@ -99,6 +99,9 @@ class NotificationReaderService : NotificationListenerService() {
     // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
     // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
     private val deliveryContentTime = ConcurrentHashMap<String, Long>()
+    // Sinyal delivery lebih tua dari ini = basi (order tuntas tanpa notif tuntas).
+    // Order aktif selalu update jauh di bawah ini (Grab ganti key tiap stage).
+    private val DELIVERY_MAX_AGE_MS = 3 * 60 * 60 * 1000L
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
     private lateinit var permanentIslandManager: PermanentIslandManager
@@ -840,29 +843,13 @@ class NotificationReaderService : NotificationListenerService() {
                 if (debugLogEnabled()) Log.w("HyperBridgeDebug", "SKIP save REAL (toggle off) pkg=${sbn.packageName} type=$type")
             }
 
-            // --- LAYERED TRIGGERS LOGIC — fallback: Shopee/Grab DELIVERY eligible auto-allow ---
-            val effectiveTypes = getEffectiveTypes(sbn.packageName)
-            if (!effectiveTypes.contains(type.name)) {
-                val isShopeeDeliveryBypass = sbn.packageName == "com.shopee.id" && type == NotificationType.DELIVERY &&
-                    (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
-                // Grab Transaction stage ("In the kitchen", "is here", ...) = order aktif,
-                // auto-allow seperti Shopee live (promo GrabMore/Feedback/CALL sudah dikecualikan di detect).
-                val isGrabDeliveryBypass = sbn.packageName == "com.grabtaxi.passenger" && type == NotificationType.DELIVERY
-                if (isShopeeDeliveryBypass || isGrabDeliveryBypass) {
-                    if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for ${sbn.packageName} DELIVERY: $effectiveTypes -> force allow (auto-enable)")
-                    serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
-                } else {
-                    if (debugLogEnabled()) Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
-                    return
-                }
-            }
-
-            // --- DELIVERY FINISHED + SINGLE-PILL DEDUP ---
-            // Order tuntas ("Selamat menikmati"/"selesai"/"delivered"): dismiss pill yang
-            // ada, jangan post pill baru. Tanpa ini pill nangkring + double (key lama stage
-            // jalan + key baru stage selesai hidup bersamaan, yg lama stuck "tidak selesai").
-            // Signature order (liveId Shopee / grab:pkg) dikecualikan dari dedup agar
-            // collapse mulus di bawah (satu order = satu pill, reuse bridgeId) tidak rusak.
+            // --- DELIVERY FINISHED (sebelum gate tipe) ---
+            // Order tuntas harus membunuh pill walau notif tuntasnya bertipe lain
+            // (rating/promo yang tipenya dimatikan user) atau DELIVERY-nya dimatikan.
+            // Safety net umur: original lebih tua dari TTL = sinyal basi. Kasus nyata:
+            // Grab tuntas TANPA notif tuntas sama sekali (6 notif Transaction nangkring,
+            // tidak ada yang baru) -> pill nyangkut 70% selamanya. Pakai sbn.postTime
+            // (waktu sistem) agar reinstall/resync tak membangkitkan pill basi.
             val deliveryCorpus = listOf(
                 effectiveTitle, effectiveText,
                 extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
@@ -882,14 +869,49 @@ class NotificationReaderService : NotificationListenerService() {
                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED dismiss pkg=${sbn.packageName} key=$key title='$effectiveTitle'")
                 return
             }
-            // SELESAI yang terdeteksi sbg tipe lain (rating/order-tuntas beda channel):
-            // pill delivery lama tetap dibunuh agar tidak nyangkut. Notif saat ini tetap
-            // diproses normal (rating muncul sekali, bukan double).
+            // SELESAI bertipe lain + pill delivery aktif: bunuh pill, notif lanjut normal.
             if (type != NotificationType.DELIVERY &&
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus) &&
+                activeIslands.values.any { it.type == NotificationType.DELIVERY && it.packageName == sbn.packageName }
             ) {
                 dismissDeliveryPills(sbn.packageName)
             }
+            // Sinyal basi: order aktif selalu update < TTL; yang lebih tua = sudah tuntas diam-diam.
+            if (type == NotificationType.DELIVERY &&
+                System.currentTimeMillis() - sbn.postTime > DELIVERY_MAX_AGE_MS
+            ) {
+                dismissDeliveryPills(sbn.packageName)
+                try {
+                    NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
+                } catch (_: Exception) {}
+                cleanupCache(key)
+                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-STALE-AGE skip key=$key age=${System.currentTimeMillis() - sbn.postTime}ms pkg=${sbn.packageName}")
+                return
+            }
+
+            // --- LAYERED TRIGGERS LOGIC — fallback: Shopee/Grab DELIVERY eligible auto-allow ---
+            val effectiveTypes = getEffectiveTypes(sbn.packageName)
+            if (!effectiveTypes.contains(type.name)) {
+                val isShopeeDeliveryBypass = sbn.packageName == "com.shopee.id" && type == NotificationType.DELIVERY &&
+                    (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
+                // Grab Transaction stage ("In the kitchen", "is here", ...) = order aktif,
+                // auto-allow seperti Shopee live (promo GrabMore/Feedback/CALL sudah dikecualikan di detect).
+                val isGrabDeliveryBypass = sbn.packageName == "com.grabtaxi.passenger" && type == NotificationType.DELIVERY
+                if (isShopeeDeliveryBypass || isGrabDeliveryBypass) {
+                    if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for ${sbn.packageName} DELIVERY: $effectiveTypes -> force allow (auto-enable)")
+                    serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
+                } else {
+                    if (debugLogEnabled()) Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
+                    return
+                }
+            }
+
+            // --- DELIVERY SINGLE-PILL DEDUP ---
+            // Stage update via key baru selagi key lama masih hidup -> tanpa collapse ini
+            // muncul double pill (satu stuck stage lama). Signature order yang sama
+            // (liveId Shopee / grab:pkg) dikecualikan agar collapse mulus di bawah
+            // (satu order = satu pill, reuse bridgeId) tidak rusak.
+            // (Finished + stale-age sudah ditangani SEBELUM gate tipe di atas.)
             if (type == NotificationType.DELIVERY) {
                 // Single-pill: stage update via key baru selagi key lama masih hidup
                 // -> tanpa collapse ini muncul double pill (satu stuck stage lama).
