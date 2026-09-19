@@ -103,6 +103,15 @@ class NotificationReaderService : NotificationListenerService() {
     private val deliveryEtaJobs = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
+    // Pill yang di-dismiss (swipe user / TTL / ETA / tuntas): konten IDENTIK tidak
+    // boleh muncul lagi bila notifnya lahir sebelum/saat dismiss (repost sync /
+    // update Grab yang sama). Order BARU (postTime lebih baru, walau teksnya sama
+    // persis) selalu lolos — live update tidak mati, reorder resto sama aman.
+    private val dismissedContent = ConcurrentHashMap<String, Pair<Int, Long>>()
+    private val DISMISS_SUPPRESS_MAX_AGE_MS = 6 * 60 * 60_000L
+    // Grace buat cancel+repost key-baru-konten-sama (Grab burst update<key> ganti
+    // tiap post): 3 mnt setelah swipe, konten identik tetap gugur walau postTime baru.
+    private val DISMISS_GRACE_MS = 3 * 60_000L
     private lateinit var permanentIslandManager: PermanentIslandManager
     private val intentionallyRemovedKeys = ConcurrentHashMap.newKeySet<String>()
     private val widgetUpdateDebouncer = ConcurrentHashMap<Int, Long>()
@@ -446,6 +455,9 @@ class NotificationReaderService : NotificationListenerService() {
                     } catch (e: Exception) {
                         if (debugLogEnabled()) Log.e(TAG, "Error sending delete intent for original notification", e)
                     }
+                    // Swipe user = jangan tampilkan konten identik 30 mnt (ori masih
+                    // hidup -> sync/update Grab bakal me-repost; tanpa ini swipe sia-sia).
+                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
                     cleanupCache(originalKey)
                 }
                 return
@@ -473,6 +485,7 @@ class NotificationReaderService : NotificationListenerService() {
                         try {
                             NotificationManagerCompat.from(this@NotificationReaderService).cancel(hyperId)
                         } catch (_: Exception) {}
+                        activeIslands[notifKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
                         cleanupCache(notifKey)
                     }
                     removalJobs.remove(notifKey)
@@ -543,9 +556,30 @@ class NotificationReaderService : NotificationListenerService() {
             try {
                 NotificationManagerCompat.from(this).cancel(island.id)
             } catch (_: Exception) {}
+            noteDismissed(island.packageName, island.lastContentHash)
             cleanupCache(staleKey)
         }
         if (stale.isNotEmpty() && debugLogEnabled()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+    }
+
+    /** Catat konten yang di-dismiss agar repost identik yang lebih tua gugur. */
+    private fun noteDismissed(pkg: String, contentHash: Int) {
+        val now = System.currentTimeMillis()
+        dismissedContent.entries.removeIf { now - it.value.second > DISMISS_SUPPRESS_MAX_AGE_MS }
+        dismissedContent[pkg] = contentHash to now
+    }
+
+    /** True bila konten ini adalah repost dari yang baru di-dismiss — jangan post ulang. */
+    private fun isDismissSuppressed(pkg: String, contentHash: Int, postTime: Long): Boolean {
+        val (hash, time) = dismissedContent[pkg] ?: return false
+        val now = System.currentTimeMillis()
+        if (now - time > DISMISS_SUPPRESS_MAX_AGE_MS) {
+            dismissedContent.remove(pkg)
+            return false
+        }
+        if (hash != contentHash) return false
+        // Notif lama (reprocess sync) selalu gugur; notif baru gugur hanya dalam grace.
+        return postTime <= time + 60_000L || now - time < DISMISS_GRACE_MS
     }
 
     // Pengecekan tuntas berjangkar ETA order itu sendiri (bukan angka tetap):
@@ -645,6 +679,7 @@ class NotificationReaderService : NotificationListenerService() {
                     delay((timeoutSeconds * 1000L).milliseconds)
                     if (debugLogEnabled()) Log.d(TAG, "Timeout reached for $originalKey, removing translated notification $bridgeId")
                     NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
+                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
                     cleanupCache(originalKey)
                     timeoutJobs.remove(originalKey)
                 }
@@ -657,6 +692,7 @@ class NotificationReaderService : NotificationListenerService() {
                 delay(STANDARD_ISLAND_TIMEOUT_MS)
                 if (debugLogEnabled()) Log.d(TAG, "Island TTL reached for $originalKey, removing translated notification $bridgeId")
                 NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
+                activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
                 cleanupCache(originalKey)
                 timeoutJobs.remove(originalKey)
             }
@@ -1183,6 +1219,13 @@ class NotificationReaderService : NotificationListenerService() {
 
                 if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
 
+                // User/sistem baru saja dismiss konten identik -> jangan post ulang.
+                // Test/clone dikecualikan agar replay stage di Test screen deterministik.
+                if (!isTestNotif && !isRealClone && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+                    if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
+                    return
+                }
+
                 if (!shouldAlertOnce) {
                     ShizukuManager.notify(this, bridgeId, notification)
                 } else {
@@ -1223,6 +1266,12 @@ class NotificationReaderService : NotificationListenerService() {
             // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
             val newContentHash = data.jsonParam.hashCode()
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
+
+            // User/sistem baru saja dismiss konten identik -> jangan post ulang.
+            if (!isTestNotif && !isRealClone && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+                if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
+                return
+            }
 
             kotlinx.coroutines.yield()
 
