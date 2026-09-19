@@ -816,7 +816,7 @@ class NotificationReaderService : NotificationListenerService() {
             }
             // Grab live-activity RV-only: extras null semua -> judul generik (BUKAN label
             // app "Grab"); isi stage/ETA datang dari korpus RV via translator/async.
-            if (effectiveTitle.isEmpty() && sbn.packageName == "com.grabtaxi.passenger" &&
+            if (effectiveTitle.isEmpty() && isGrabPipeline(sbn) &&
                 extras.getBoolean("android.contains.customView", false)
             ) {
                 effectiveTitle = getString(R.string.type_delivery)
@@ -839,7 +839,7 @@ class NotificationReaderService : NotificationListenerService() {
             // dan GrabFood live-activity (teks hanya di RV, extras null — dibaca async).
             val hasProgress = hasProgressNotification(sbn, effectiveTitle, effectiveText)
             val isShopeeLiveEligible = sbn.packageName == "com.shopee.id" && extras.containsKey("extra_live_activity_id")
-            val isGrabLiveEligible = sbn.packageName == "com.grabtaxi.passenger" &&
+            val isGrabLiveEligible = isGrabPipeline(sbn) &&
                 extras.getBoolean("android.contains.customView", false) &&
                 (sbn.notification.channelId?.contains("live_activity", ignoreCase = true) == true)
             if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible && !isGrabLiveEligible) {
@@ -979,7 +979,7 @@ class NotificationReaderService : NotificationListenerService() {
                     (extras.containsKey("extra_live_activity_id") || sbn.notification.channelId?.contains("LIVE_ACTIVITY") == true)
                 // Grab Transaction stage ("In the kitchen", "is here", ...) = order aktif,
                 // auto-allow seperti Shopee live (promo GrabMore/Feedback/CALL sudah dikecualikan di detect).
-                val isGrabDeliveryBypass = sbn.packageName == "com.grabtaxi.passenger" && type == NotificationType.DELIVERY
+                val isGrabDeliveryBypass = isGrabPipeline(sbn) && type == NotificationType.DELIVERY
                 if (isShopeeDeliveryBypass || isGrabDeliveryBypass) {
                     if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for ${sbn.packageName} DELIVERY: $effectiveTypes -> force allow (auto-enable)")
                     serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
@@ -998,7 +998,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (type == NotificationType.DELIVERY) {
                 // Single-pill: stage update via key baru selagi key lama masih hidup
                 // -> tanpa collapse ini muncul double pill (satu stuck stage lama).
-                val incomingSig: String? = if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}"
+                val incomingSig: String? = if (isGrabPipeline(sbn)) "grab:${sbn.packageName}"
                     else extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
                 val dupes = activeIslands.entries.filter {
                     it.value.type == NotificationType.DELIVERY &&
@@ -1023,7 +1023,7 @@ class NotificationReaderService : NotificationListenerService() {
             // DELIVERY satu order = satu pill: update stage (key baru) menimpa island
             // order aktif yg sama (liveId Grab=nempel per-pkg, Shopee=liveId), bukan nambah pill.
             if (!isUpdate && type == NotificationType.DELIVERY) {
-                val grabKey = if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}" else null
+                val grabKey = if (isGrabPipeline(sbn)) "grab:${sbn.packageName}" else null
                 val liveId = extras.getString("extra_live_activity_id")
                 val orderSig = grabKey ?: liveId?.takeIf { it.isNotEmpty() }
                 if (orderSig != null) {
@@ -1243,7 +1243,7 @@ class NotificationReaderService : NotificationListenerService() {
             // stage berikutnya menimpa island yg sama (satu order = satu pill).
             val deliveryOrderSig = if (type == NotificationType.DELIVERY) {
                 extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
-                    ?: if (sbn.packageName == "com.grabtaxi.passenger") "grab:${sbn.packageName}" else ""
+                    ?: if (isGrabPipeline(sbn)) "grab:${sbn.packageName}" else ""
             } else ""
             activeIslands[effectiveKey] = ActiveIsland(
                 id = bridgeId, type = type, postTime = System.currentTimeMillis(),
@@ -1275,7 +1275,7 @@ class NotificationReaderService : NotificationListenerService() {
                 val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
                 // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right
                 val isEtaEmpty = data.jsonParam.contains("\"textInfo\":{\"title\":\"\"") && data.jsonParam.contains("imageTextInfoRight")
-                val isGrabRvOnly = sbn.packageName == "com.grabtaxi.passenger" &&
+                val isGrabRvOnly = isGrabPipeline(sbn) &&
                     effectiveTitle.isEmpty() && effectiveText.isEmpty()
                 if ((isEtaEmpty || !hasEta || isGrabRvOnly) && hasRv) {
                     val sbnKey = sbn.key
@@ -1300,7 +1300,7 @@ class NotificationReaderService : NotificationListenerService() {
                             if (!activeIslands.containsKey(capturedEffectiveKey)) return@launch
                             // GRAB RV-only: korpus RV = isi utama (stage/ETA/shade), update walau tanpa ETA.
                             // Shopee: hanya update bila ketemu waktu baru (pinjaman lama tetap tampil bila miss).
-                            val isGrabUpdate = capturedSbn.packageName == "com.grabtaxi.passenger" && !rvCorpus.isNullOrBlank()
+                            val isGrabUpdate = isGrabPipeline(capturedSbn) && !rvCorpus.isNullOrBlank()
                             if (!rvEta.isNullOrBlank() || isGrabUpdate) {
                                 if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ASYNC-ETA hit sbn=$sbnKey eta='$rvEta' corpus='${rvCorpus?.take(160)}'")
                                 val updatedData = deliveryTranslator.translate(
@@ -1498,7 +1498,7 @@ class NotificationReaderService : NotificationListenerService() {
         // Promo ("Offers From Grab": GrabMore/Bintang Lima) + Feedback + CALL dikecualikan.
         // Operasional ("Photo upload successful" / "Thanks for helping out your driver!")
         // BUKAN stage — wajib pola status order, kata "driver" doang tidak cukup.
-        val isGrab = sbn.packageName == "com.grabtaxi.passenger"
+        val isGrab = isGrabPipeline(sbn)
         val isGrabLiveEligible = isGrab && hasCustomView &&
             (channelId.contains("live_activity", ignoreCase = true) || channelId.contains("grabfood", ignoreCase = true) || channelId.contains("food", ignoreCase = true))
         val isGrabPromoChannel = channelId.contains("offers", ignoreCase = true) ||
@@ -1730,7 +1730,7 @@ class NotificationReaderService : NotificationListenerService() {
         if (pkg == "com.shopee.id" && extras.containsKey("extra_live_activity_id")) return false
         // GrabFood: live-activity RV-only + Transaction stage ("In the kitchen", "is here")
         // tidak pernah junk — teks Inggris, tak cocok pola junk Indonesia.
-        if (pkg == "com.grabtaxi.passenger") {
+        if (isGrabPipeline(sbn)) {
             val ch = notification.channelId ?: ""
             if (ch.contains("live_activity", ignoreCase = true)) return false
             if (ch.equals("Transaction", ignoreCase = true)) {
@@ -1799,6 +1799,15 @@ class NotificationReaderService : NotificationListenerService() {
 
     private fun shouldIgnore(packageName: String): Boolean = packageName == this.packageName || packageName == "android" || packageName.contains("miui.notification")
     private fun isAppAllowed(packageName: String): Boolean = allowedPackageSet.contains(packageName)
+
+    /** Jalur Grab 1:1 — paket Grab asli ATAU REAL-clone bertanda Grab (Test screen). */
+    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == "com.grabtaxi.passenger") return true
+        if (sbn.packageName != packageName) return false
+        val ex = sbn.notification.extras
+        return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
+            ex.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_PKG) == "com.grabtaxi.passenger"
+    }
 
     private var syncJob: Job? = null
 

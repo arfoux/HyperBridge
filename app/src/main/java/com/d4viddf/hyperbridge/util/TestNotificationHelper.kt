@@ -33,6 +33,8 @@ object TestNotificationHelper {
     /** Marker for DELIVERY REAL-clone posts: must pass onNotificationPosted gates (never hyperbridge_test). */
     const val EXTRA_REAL_CLONE = "hyperbridge_real_clone"
     const val EXTRA_REAL_STAGE = "hyperbridge_real_stage"
+    /** Paket yang disimulasikan clone (mis. "com.grabtaxi.passenger"). Hanya bermakna bila EXTRA_REAL_CLONE=true. */
+    const val EXTRA_REAL_PKG = "hyperbridge_real_pkg"
 
     /** Same channel id as the real ShopeeFood live activity (DELIVERY_VERIFY pattern). */
     const val REAL_CHANNEL_ID = "SHOPEE_LIVE_ACTIVITY_ID"
@@ -135,6 +137,96 @@ object TestNotificationHelper {
         val nm = context.getSystemService(NotificationManager::class.java)
         DeliveryStage.entries.forEach { nm.cancel(REAL_BASE_ID + it.ordinal) }
         android.util.Log.w("HyperBridgeTest", "CANCELED REAL-CLONES")
+    }
+
+    /**
+     * Grab 1:1 dari traffic asli (order Burjo Titik Kumpul, 2026-09-19).
+     * Channel Transaction/Feedback + teks Inggris persis — beda dengan clone Shopee
+     * yang lewat jalur generik liveId. Masuk pipeline REAL sebagai paket Grab
+     * (cabang isGrabPipeline), jadi collapse grab:pkg, dedup, sibling-dismiss,
+     * dan motor hijau ikut keuji.
+     */
+    enum class GrabStage(val channel: String, val title: String, val text: String) {
+        KITCHEN(
+            "Transaction",
+            "In the kitchen",
+            "Burjo Titik Kumpul - Tembalang is preparing your order. Tap to see details."
+        ),
+        ONWAY(
+            "Transaction",
+            "Grab",
+            "Your order from Burjo Titik Kumpul - Tembalang is on the way to you. Provide your floor or unit number to your driver if applicable."
+        ),
+        ISHERE(
+            "Transaction",
+            "Grab",
+            "Your order from Burjo Titik Kumpul - Tembalang is here! If there are any issues with your order, share it with us within 12 hours upon receiving it."
+        ),
+        FEEDBACK(
+            "Feedback",
+            "GrabFood",
+            "Did You Enjoy Your Order?\nWe would love to hear your feedback on Burjo Titik Kumpul - Tembalang."
+        );
+    }
+
+    private const val REAL_GRAB_BASE_ID = 92000
+
+    fun postRealGrabClone(context: Context, stage: GrabStage) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val ch = NotificationChannel(stage.channel, "Grab ${stage.channel} (test clone)", NotificationManager.IMPORTANCE_HIGH)
+        nm.createNotificationChannel(ch)
+        val id = REAL_GRAB_BASE_ID + stage.ordinal
+        val builder = NotificationCompat.Builder(context, stage.channel)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(stage.title)
+            .setContentText(stage.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(stage.text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(stage != GrabStage.FEEDBACK)
+            .setAutoCancel(true)
+            .setContentIntent(dummyPendingIntent(context, 9200 + stage.ordinal))
+        val notif = builder.build()
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, "GRAB_${stage.name}")
+        notif.extras.putString(EXTRA_REAL_PKG, "com.grabtaxi.passenger")
+        nm.notify(id, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED REAL-GRAB-CLONE stage=${stage.name} id=$id ch=${stage.channel}")
+    }
+
+    /**
+     * Grab live-activity RV-only 1:1: title/text extras KOSONG + custom contentView,
+     * channel live_activity_channel_01 — pola notif Grab asli (id 1455702982).
+     * Isi stage di dalam RemoteViews agar jalur async-RV ikut keuji.
+     */
+    fun postRealGrabLiveClone(context: Context) {
+        val chId = "live_activity_channel_01"
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(chId, "Live Activity (grab test clone)", NotificationManager.IMPORTANCE_HIGH))
+        val rv = android.widget.RemoteViews(context.packageName, android.R.layout.simple_list_item_1)
+        rv.setTextViewText(android.R.id.text1, "Burjo Titik Kumpul - Tembalang is on the way to you")
+        val builder = NotificationCompat.Builder(context, chId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(rv)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(dummyPendingIntent(context, 9299))
+        val notif = builder.build()
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, "GRAB_LIVE_RV")
+        notif.extras.putString(EXTRA_REAL_PKG, "com.grabtaxi.passenger")
+        // System menandai contains.customView bila contentView ada; paksa agar 1:1.
+        notif.extras.putBoolean("android.contains.customView", true)
+        nm.notify(REAL_GRAB_BASE_ID + 10, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED REAL-GRAB-LIVE-RV ch=$chId")
+    }
+
+    fun cancelRealGrabClones(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        GrabStage.entries.forEach { nm.cancel(REAL_GRAB_BASE_ID + it.ordinal) }
+        nm.cancel(REAL_GRAB_BASE_ID + 10)
+        android.util.Log.w("HyperBridgeTest", "CANCELED REAL-GRAB-CLONES")
     }
 
     /**

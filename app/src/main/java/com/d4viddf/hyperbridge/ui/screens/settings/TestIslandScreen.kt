@@ -184,6 +184,48 @@ fun TestIslandScreen(onBack: () -> Unit) {
                             TestNotificationHelper.cancelRealClones(context)
                         }, modifier = Modifier.fillMaxWidth()) { Text("Cancel semua") }
                         Spacer(Modifier.height(8.dp))
+                        Text(
+                            "GRAB 1:1 (Transaction/Feedback EN + live RV-only) — cabang Grab asli, bukan jalur generik.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        TestNotificationHelper.GrabStage.entries.forEach { stage ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stage.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Button(onClick = {
+                                    TestNotificationHelper.postRealGrabClone(context, stage)
+                                }) { Text("Post") }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "LIVE_RV (kosong + customView)",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(onClick = {
+                                TestNotificationHelper.postRealGrabLiveClone(context)
+                            }) { Text("Post") }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedButton(onClick = {
+                            TestNotificationHelper.cancelRealGrabClones(context)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Cancel Grab") }
+                        Spacer(Modifier.height(8.dp))
                         Button(onClick = {
                             try {
                                 val component = android.content.ComponentName(

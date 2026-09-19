@@ -63,6 +63,15 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
     }
 
     private val preferences = AppPreferences(context)
+
+    /** Jalur Grab 1:1 — paket Grab asli ATAU REAL-clone bertanda Grab (Test screen). */
+    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == "com.grabtaxi.passenger") return true
+        if (sbn.packageName != context.packageName) return false
+        val ex = sbn.notification.extras
+        return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
+            ex.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_PKG) == "com.grabtaxi.passenger"
+    }
     fun translate(
         sbn: StatusBarNotification,
         effectiveTitle: String,
@@ -75,7 +84,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
     ): HyperIslandData {
 
         // 1. Resolve Theme Colors — hijau Grab untuk GrabFood, oranye Shopee default.
-        val themeColor = if (sbn.packageName == "com.grabtaxi.passenger") "#00B14F"
+        val themeColor = if (isGrabPipeline(sbn)) "#00B14F"
             else resolveColor(theme, sbn.packageName, "#EE4D2D") // Shopee orange-ish default
 
         // 2. Parse Notification Content — fallback chain: ambil semua data eligible
@@ -171,7 +180,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
         if (liveId.isNotEmpty()) lastOrderByPkg[sbn.packageName] = liveId
         // Grab tak punya liveId — satu live-activity aktif per pkg, kunci per pkg.
-        if (orderKey.isEmpty() && sbn.packageName == "com.grabtaxi.passenger") {
+        if (orderKey.isEmpty() && isGrabPipeline(sbn)) {
             orderKey = "grab:${sbn.packageName}"
         }
         if (orderKey.isNotEmpty() && isFinishedStage(stage, stageCorpus)) {
@@ -204,7 +213,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // hemat decode bitmap per update). Shopee: logo ShopeeFood hardcode
         // (largeIcon Shopee tak pernah ada di dump, jadi Shopee juga hardcode).
         val logoKey = "${picKey}_logo"
-        val isGrab = sbn.packageName == "com.grabtaxi.passenger"
+        val isGrab = isGrabPipeline(sbn)
         if (isGrab) {
             builder.addPicture(grabBikePicture(logoKey))
         } else {
@@ -289,7 +298,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val islandPct = progressPercent ?: percent.takeIf { hasProgress } ?: ((stage ?: 0) * 100 / 3)
         // Judul stage ringkas buat kiri pill (tanpa teks panjang resto).
         // Grab tak bawa judul ("Food & Delivery" generik) — pakai kanan generik juga.
-        val isGrabGeneric = sbn.packageName == "com.grabtaxi.passenger" && title == context.getString(R.string.type_delivery)
+        val isGrabGeneric = isGrabPipeline(sbn) && title == context.getString(R.string.type_delivery)
         val stageTitle = if (isGrabGeneric) "" else title.take(24)
         // Kiri pill = logoKey (Grab = motor hijau hardcode, Shopee = logo hardcode).
         // Kanan = pin tujuan; lingkaran progres nempel di kiri (pola kit Template 7).
