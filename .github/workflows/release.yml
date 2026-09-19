@@ -155,7 +155,7 @@ jobs:
           echo "" >> release_notes.md
           echo "### 📥 Download" >> release_notes.md
           echo "- \`HyperBridge-${TAG}.apk\` — Universal APK (debug/release)" >> release_notes.md
-          echo "- Also available via [nightly.link](https://nightly.link/arfoux/HyperBridge/workflows/build.yml/refs/heads/master/app-debug.zip)" >> release_notes.md
+          echo "- Per-commit debug APK: Actions tab → Build Debug APK → artifact app-debug (perlu login), atau via CLI: \`gh run download -R arfoux/HyperBridge -n app-debug <run-id>\`" >> release_notes.md
           cat release_notes.md
 
       - name: Create GitHub Release
