@@ -950,22 +950,24 @@ class NotificationReaderService : NotificationListenerService() {
                 dismissDeliveryPills(sbn.packageName)
             }
             // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
-            // lain ber-marker tuntas, postingan stage basi ini gugur — dismiss + skip.
-            // Bukti: rating Feedback diproses dulu (tak ada pill), lalu "on the way" hidup lagi.
+            // lain ber-marker tuntas DAN lebih baru dari stage ini, postingan stage basi
+            // ini gugur — dismiss + skip.
+            // Syarat postTime: feedback/rating order LAMA (lebih tua) tidak boleh
+            // membunuh pill order BARU (bukti: Feedback ...778 vs kitchen ...643).
             if (type == NotificationType.DELIVERY) {
-                val siblingFinished = try {
-                    activeNotifications?.any { other ->
+                val finishedSibling = try {
+                    activeNotifications?.filter { other ->
                         other.packageName == sbn.packageName && other.key != key &&
                             com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(sbnCorpus(other))
-                    } == true
-                } catch (_: Exception) { false }
-                if (siblingFinished) {
+                    }?.maxByOrNull { it.postTime }
+                } catch (_: Exception) { null }
+                if (finishedSibling != null && finishedSibling.postTime >= sbn.postTime) {
                     dismissDeliveryPills(sbn.packageName)
                     try {
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                     } catch (_: Exception) {}
                     cleanupCache(key)
-                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key")
+                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key by=${finishedSibling.key}")
                     return
                 }
             }
