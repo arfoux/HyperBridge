@@ -56,7 +56,9 @@ object RemoteViewsExtractor {
             c.contains("sudah diterima") || c.contains("pesanan diterima") ||
             c.contains("beri penilaian") || c.contains("berikan penilaian") ||
             c.contains("nilai pesanan") || c.contains("kasih rating") ||
-            c.contains("enjoy your meal") ||
+            c.contains("enjoy your meal") || c.contains("enjoy your order") ||
+            c.contains("did you enjoy your order") || c.contains("hear your feedback") ||
+            c.contains("your feedback") ||
             c.contains("delivered") ||
             c.contains("order complete") || c.contains("order completed") ||
             c.contains("rate your") || c.contains("how was your")
