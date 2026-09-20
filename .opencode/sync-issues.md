@@ -14,3 +14,8 @@
 - Update beku sampai toggle: `f4ec859` + `81f1be7`, menunggu LIVE-1.
 - Desain pill/big island: `a091927`, verified via `miui.focus.param` JSON.
 - CI merah 2x (`isRealClone` scope, duplikat `pctLabel`): fixed, CI hijau.
+- Sync rebind balapan daftar kosong: `788baa7` (retry 1d+4d), CI hijau.
+- Double pill tanpa konvergensi: `200c3a8` + `dac4919` (konvergensi dini), CI hijau.
+- Pelajaran 2026-09-20: (a) cek flag `debug_logging`/`save_real` DULU saat log sunyi
+  (user mematikan keduanya; history ikut ke-clear); (b) toggle layar via adb void
+  bila scrcpy stay-awake — klaim verifikasi via toggle dicabut, hanya log + JSON yang sah.

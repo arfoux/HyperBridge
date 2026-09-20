@@ -15,6 +15,8 @@
       resto tampil, motor hijau, `100%`)
 - [x] (completed) Review 7 commit + audit default DND/limit (tidak ada silent killer)
 - [x] (completed) Unit test `RemoteViewsExtractorTest` (12 test, pure JVM, hijau lokal + CI)
+- [x] (completed) Sync retry pasca-bind + konvergensi dini (`788baa7`, `200c3a8`, `dac4919`, CI hijau)
+- [x] (completed) Bukti render final: ETA `15mnt` + `Tiba 13:55 - 14:10` + resto di JSON (adb)
 
 ## Menunggu order berikutnya (butuh live order, tidak bisa diuji tanpa itu)
 - [ ] Uji swipe: Post KITCHEN → swipe → kunci/buka → pill tidak balik (`SUPPRESSED-SWIPE`)
