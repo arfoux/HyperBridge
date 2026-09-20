@@ -1033,6 +1033,29 @@ class NotificationReaderService : NotificationListenerService() {
             // (liveId Shopee / grab:pkg) dikecualikan agar collapse mulus di bawah
             // (satu order = satu pill, reuse bridgeId) tidak rusak.
             // (Finished + stale-age sudah ditangani SEBELUM gate tipe di atas.)
+            // Konvergensi dini: bunuh pill LAIN order sama yang kontennya lebih tua,
+            // sisakan SATU target-termuda untuk collapse (update mulus tanpa flicker).
+            // Wajib DI SINI (sebelum semua early-return dedup/hash) — double historis
+            // yang ter-track tidak pernah sampai collapse bila return lebih dulu.
+            if (type == NotificationType.DELIVERY) {
+                val sig = deliveryOrderSig(sbn)
+                if (sig != null) {
+                    val staleSames = activeIslands.entries.filter {
+                        it.value.type == NotificationType.DELIVERY &&
+                            it.value.packageName == sbn.packageName && it.key != key &&
+                            it.value.subText == sig &&
+                            (deliveryContentTime[it.key] ?: 0L) < sbn.postTime
+                    }.sortedByDescending { deliveryContentTime[it.key] ?: 0L }
+                    // drop(1): yang termuda dipertahankan sebagai target collapse.
+                    for ((staleKey, island) in staleSames.drop(1)) {
+                        try {
+                            NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
+                        } catch (_: Exception) {}
+                        cleanupCache(staleKey)
+                        if (debugLogEnabled()) Log.w(TAG, "DELIVERY-CONVERGE cancel $staleKey keep-newest")
+                    }
+                }
+            }
             if (type == NotificationType.DELIVERY) {
                 // Single-pill: stage update via key baru selagi key lama masih hidup
                 // -> tanpa collapse ini muncul double pill (satu stuck stage lama).
@@ -1159,32 +1182,6 @@ class NotificationReaderService : NotificationListenerService() {
             if (!isUpdate && activeIslands.size >= MAX_ISLANDS) {
                 handleLimitReached(type, sbn.packageName)
                 if (activeIslands.size >= MAX_ISLANDS) return
-            }
-
-            // Konvergensi satu order = satu pill: bila reprocess (tracked) menemukan
-            // pill LAIN order yang sama, bunuh yang kontennya lebih tua. Tanpa ini
-            // double historis (lolos collapse saat post) nempel selamanya karena
-            // collapse cuma jalan saat post baru.
-            if (type == NotificationType.DELIVERY && !isTestNotif && !isRealClonePost) {
-                val sig = deliveryOrderSig(sbn)
-                if (sig != null) {
-                    val keepTime = deliveryContentTime[effectiveKey] ?: 0L
-                    val others = activeIslands.entries.filter {
-                        it.key != effectiveKey && it.value.type == NotificationType.DELIVERY &&
-                            it.value.packageName == sbn.packageName && it.value.subText == sig
-                    }
-                    for ((otherKey, island) in others) {
-                        val otherTime = deliveryContentTime[otherKey] ?: 0L
-                        // Hanya yang strictly lebih tua; seri/tak-diketahui jangan disentuh.
-                        if (otherTime < keepTime) {
-                            try {
-                                NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
-                            } catch (_: Exception) {}
-                            cleanupCache(otherKey)
-                            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-CONVERGE cancel $otherKey keep $effectiveKey")
-                        }
-                    }
-                }
             }
 
             val appIslandConfig = preferences.getAppIslandConfigSync(sbn.packageName)
