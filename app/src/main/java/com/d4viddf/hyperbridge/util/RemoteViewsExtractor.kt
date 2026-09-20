@@ -35,6 +35,7 @@ object RemoteViewsExtractor {
                 corpus.contains("heading to") || corpus.contains("heading your way") -> 2
             corpus.contains("disiapkan") || corpus.contains("menyiapkan") ||
                 corpus.contains("diproses") || corpus.contains("in the kitchen") ||
+                corpus.contains("mencari driver") || corpus.contains("finding driver") ||
                 corpus.contains("preparing your order") || corpus.contains("preparing") -> 1
             else -> null
         }
@@ -79,6 +80,8 @@ object RemoteViewsExtractor {
             lowerAll.contains("selamat menikmati") || lowerAll.contains("sudah tiba") ||
                 lowerAll.contains("telah tiba") || lowerAll.contains("selesai") ||
                 lowerAll.contains("is here") || lowerAll.contains("delivered") -> 100
+            // Awal order (cari driver) — persen kecil, pill muncul sejak awal.
+            lowerAll.contains("mencari driver") || lowerAll.contains("finding driver") -> 10
             lowerAll.contains("hampir tiba") || lowerAll.contains("menuju lokasi") ||
                 lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") ||
                 lowerAll.contains("on the way") || lowerAll.contains("on its way") ||
@@ -310,15 +313,10 @@ object RemoteViewsExtractor {
             if (n != null) return "$n menit"
             return minuteMatch
         }
-        // 2. Range jam -> hitung menit dari data yang ada, jangan tampilkan range mentah.
-        //    Utamakan sisa waktu (ujung range - sekarang), fallback durasi (ujung - awal).
+        // 2. Range jam ("07.25 - 07.40") -> durasi window ("15 menit").
+        //    Durasi stabil & sesuai ekspektasi; sisa-ke-ujung menipu saat window masih jauh.
         val rangeMatch = all.firstOrNull { it.matches(rangeRegex) }
         if (rangeMatch != null) {
-            val end = parseRangeEnd(rangeMatch)
-            if (end != null) {
-                val rem = minutesUntil(end)
-                if (rem in 1..180) return "$rem menit"
-            }
             val dur = parseTimeRangeDuration(rangeMatch)
             if (dur != null && dur in 1..180) return "$dur menit"
             return null
@@ -374,6 +372,11 @@ object RemoteViewsExtractor {
         if (hours == null || minutes == null) return null
         if (hours !in 0..23 || minutes !in 0..59) return null
         return hours * 60 + minutes
+    }
+
+    /** Substring ETA mentah pertama ("07.25 - 07.40" / "Tiba pada 20:25" / "15 menit") — untuk big island. */
+    fun extractEtaRaw(corpus: String): String? {
+        return etaRegexFallback.find(corpus)?.value?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     /** Convenience: langsung extract ETA dari RemoteViews sbn */

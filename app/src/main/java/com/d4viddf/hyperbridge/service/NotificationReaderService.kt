@@ -1554,6 +1554,7 @@ class NotificationReaderService : NotificationListenerService() {
         val isGrabPromoChannel = channelId.contains("offers", ignoreCase = true) ||
             channelId.contains("feedback", ignoreCase = true)
         val hasGrabStage = combined.contains("preparing your order") || combined.contains("in the kitchen") ||
+            combined.contains("mencari driver") || combined.contains("finding driver") ||
             combined.contains("is here") || combined.contains("on the way") || combined.contains("on its way") ||
             combined.contains("arriving") || combined.contains("picked up") || combined.contains("heading to") ||
             combined.contains("heading your way") || combined.contains("delivered") || combined.contains("order complete")
@@ -1790,6 +1791,7 @@ class NotificationReaderService : NotificationListenerService() {
                 // Wajib pola status order (ketat, 1:1 detect) — "driver"/"your order" doang
                 // tidak cukup (bukti: "Photo upload successful" nyasar).
                 if (c.contains("preparing your order") || c.contains("in the kitchen") ||
+                    c.contains("mencari driver") || c.contains("finding driver") ||
                     c.contains("is here") || c.contains("on the way") || c.contains("on its way") ||
                     c.contains("arriving") || c.contains("picked up") || c.contains("heading to") ||
                     c.contains("heading your way") || c.contains("delivered") || c.contains("order complete")) return false

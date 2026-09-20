@@ -166,6 +166,11 @@ object TestNotificationHelper {
             "Feedback",
             "GrabFood",
             "Did You Enjoy Your Order?\nWe would love to hear your feedback on Burjo Titik Kumpul - Tembalang."
+        ),
+        SEARCHING(
+            "Transaction",
+            "Mencari driver",
+            "Kami sedang mencarikan driver untuk pesananmu di Burjo Titik Kumpul - Tembalang."
         );
     }
 
