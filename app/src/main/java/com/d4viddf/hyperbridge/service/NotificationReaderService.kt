@@ -1161,6 +1161,32 @@ class NotificationReaderService : NotificationListenerService() {
                 if (activeIslands.size >= MAX_ISLANDS) return
             }
 
+            // Konvergensi satu order = satu pill: bila reprocess (tracked) menemukan
+            // pill LAIN order yang sama, bunuh yang kontennya lebih tua. Tanpa ini
+            // double historis (lolos collapse saat post) nempel selamanya karena
+            // collapse cuma jalan saat post baru.
+            if (type == NotificationType.DELIVERY && !isTestNotif && !isRealClonePost) {
+                val sig = deliveryOrderSig(sbn)
+                if (sig != null) {
+                    val keepTime = deliveryContentTime[effectiveKey] ?: 0L
+                    val others = activeIslands.entries.filter {
+                        it.key != effectiveKey && it.value.type == NotificationType.DELIVERY &&
+                            it.value.packageName == sbn.packageName && it.value.subText == sig
+                    }
+                    for ((otherKey, island) in others) {
+                        val otherTime = deliveryContentTime[otherKey] ?: 0L
+                        // Hanya yang strictly lebih tua; seri/tak-diketahui jangan disentuh.
+                        if (otherTime < keepTime) {
+                            try {
+                                NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
+                            } catch (_: Exception) {}
+                            cleanupCache(otherKey)
+                            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-CONVERGE cancel $otherKey keep $effectiveKey")
+                        }
+                    }
+                }
+            }
+
             val appIslandConfig = preferences.getAppIslandConfigSync(sbn.packageName)
             val globalConfig = preferences.getGlobalConfigSync()
             val finalConfig = appIslandConfig.mergeWith(globalConfig)
@@ -1868,6 +1894,13 @@ class NotificationReaderService : NotificationListenerService() {
         val ex = sbn.notification.extras
         return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
             ex.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_PKG) == "com.grabtaxi.passenger"
+    }
+
+    /** Signature satu order DELIVERY: liveId, atau grab per-paket (Grab tak punya liveId). */
+    private fun deliveryOrderSig(sbn: StatusBarNotification): String? {
+        val liveId = sbn.notification.extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
+        if (liveId != null) return liveId
+        return if (isGrabPipeline(sbn)) "grab:${sbn.packageName}" else null
     }
 
     /** Fingerprint isi RemoteViews (reflection 1-3ms, TANPA inflate) buat DELIVERY. */

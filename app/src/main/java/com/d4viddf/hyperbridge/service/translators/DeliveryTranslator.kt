@@ -325,9 +325,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         }
         val pctLabel = islandPct.takeIf { it > 0 }?.let { "$it%" }
         // Judul stage ringkas buat kiri pill; konten = teks status penuh (resto dsb).
-        // Grab tak bawa judul ("Food & Delivery" generik) — konten dari korpus RV.
-        val isGrabGeneric = isGrabPipeline(sbn) && title == context.getString(R.string.type_delivery)
-        val stageTitle = if (isGrabGeneric) "" else title.take(24)
+        // Generik ("Food & Delivery") tetap ditampilkan agar tak kosong plong.
+        val stageTitle = title.take(24)
         // Kiri pill = logoKey (Grab = motor hijau hardcode, Shopee = logo hardcode).
         // Kanan = teks ETA + persen; lingkaran progres nempel di kiri (pola kit Template 7).
         val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"
