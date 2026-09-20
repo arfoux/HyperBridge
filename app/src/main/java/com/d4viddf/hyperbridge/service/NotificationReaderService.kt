@@ -1889,7 +1889,8 @@ class NotificationReaderService : NotificationListenerService() {
     private fun isAppAllowed(packageName: String): Boolean = allowedPackageSet.contains(packageName)
 
     /** Jalur Grab 1:1 — paket Grab asli ATAU REAL-clone bertanda Grab (Test screen). */
-    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {        if (sbn.packageName == "com.grabtaxi.passenger") return true
+    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == "com.grabtaxi.passenger") return true
         if (sbn.packageName != packageName) return false
         val ex = sbn.notification.extras
         return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
@@ -1917,13 +1918,24 @@ class NotificationReaderService : NotificationListenerService() {
         syncNotifications(refresh = true)
     }
 
-    private fun syncNotifications(refresh: Boolean = false) {
+    private fun syncNotifications(refresh: Boolean = false, retryCount: Int = 0) {
         val now = System.currentTimeMillis()
         recentlyRemovedKeys.entries.removeIf { now - it.value > 10000 }
 
         serviceScope.launch(Dispatchers.IO) {
             try {
-                val currentNotifications = activeNotifications ?: return@launch
+                val currentNotifications = activeNotifications
+                if (currentNotifications.isNullOrEmpty()) {
+                    // Race pasca-bind: ranking sistem belum tersedia — coba lagi 1d & 4d.
+                    // Tanpa ini order terlewat total sampai trigger berikutnya.
+                    if (retryCount < 2) {
+                        delay(if (retryCount == 0) 1000L else 4000L)
+                        syncNotifications(refresh, retryCount + 1)
+                    } else if (debugLogEnabled()) {
+                        Log.d(TAG, "Sync: empty active list after retries, giving up")
+                    }
+                    return@launch
+                }
                 val systemNotificationKeys = currentNotifications.map { it.key }.toSet()
 
                 var nativeChanged = false
