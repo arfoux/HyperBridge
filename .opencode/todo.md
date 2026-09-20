@@ -14,7 +14,7 @@
 - [x] (completed) Verifikasi render via adb: `miui.focus.param` JSON (pin hilang,
       resto tampil, motor hijau, `100%`)
 - [x] (completed) Review 7 commit + audit default DND/limit (tidak ada silent killer)
-- [x] (completed) Unit test `RemoteViewsExtractorTest` (11 test, pure JVM)
+- [x] (completed) Unit test `RemoteViewsExtractorTest` (12 test, pure JVM, hijau lokal + CI)
 
 ## Menunggu order berikutnya (butuh live order, tidak bisa diuji tanpa itu)
 - [ ] Uji swipe: Post KITCHEN → swipe → kunci/buka → pill tidak balik (`SUPPRESSED-SWIPE`)
