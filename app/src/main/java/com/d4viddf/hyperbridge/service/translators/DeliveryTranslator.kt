@@ -328,7 +328,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Grab tak bawa judul ("Food & Delivery" generik) — konten dari korpus RV.
         val isGrabGeneric = isGrabPipeline(sbn) && title == context.getString(R.string.type_delivery)
         val stageTitle = if (isGrabGeneric) "" else title.take(24)
-        val pctLabel = islandPct.takeIf { it > 0 }?.let { "$it%" }
         // Kiri pill = logoKey (Grab = motor hijau hardcode, Shopee = logo hardcode).
         // Kanan = teks ETA + persen; lingkaran progres nempel di kiri (pola kit Template 7).
         val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"

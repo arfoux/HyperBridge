@@ -15,5 +15,9 @@ data class ActiveIsland(
     val deleteIntent: android.app.PendingIntent? = null,
     // Cheap pre-translate signature (DELIVERY): title/text/RV-texts/image-actions/progress/actions.
     // Lets burst updates no-op in ms instead of starving behind full RV inflate.
-    val fastHash: Int = 0
+    val fastHash: Int = 0,
+    // Fingerprint RemoteViews (reflection 1-3ms, tanpa inflate): Grab update stage
+    // via RV sementara extras statis — tanpa ini update RV-only selalu di-skip dedup
+    // dan pill cuma berubah pas toggle layar (reprocess paksa).
+    val rvHash: Int = 0
 )

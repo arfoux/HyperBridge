@@ -919,7 +919,8 @@ class NotificationReaderService : NotificationListenerService() {
                     h
                 } catch (_: Exception) { 0 }
                 if (deliveryFastHash != 0 && previous != null && previous.type == NotificationType.DELIVERY &&
-                    previous.fastHash == deliveryFastHash
+                    previous.fastHash == deliveryFastHash &&
+                    rvFingerprint(sbn) == previous.rvHash
                 ) return
             }
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
@@ -1218,7 +1219,9 @@ class NotificationReaderService : NotificationListenerService() {
                         effectiveText.hashCode() + actualProgress + actualMax +
                         isIndeterminate.hashCode() + actionState.hashCode()
 
-                if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
+                if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
+                    (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
+                ) return
 
                 // User/sistem baru saja dismiss konten identik -> jangan post ulang.
                 // Test/clone dikecualikan agar replay stage di Test screen deterministik.
@@ -1239,7 +1242,8 @@ class NotificationReaderService : NotificationListenerService() {
                     id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                     packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
                     subText = "LiveUpdate", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
-                    fastHash = deliveryFastHash
+                    fastHash = deliveryFastHash,
+                    rvHash = if (type == NotificationType.DELIVERY) rvFingerprint(sbn) else 0
                 )
                 if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
                 updatePermanentIsland()
@@ -1299,7 +1303,8 @@ class NotificationReaderService : NotificationListenerService() {
                 id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                 packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
                 subText = deliveryOrderSig, lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
-                fastHash = deliveryFastHash
+                fastHash = deliveryFastHash,
+                rvHash = if (type == NotificationType.DELIVERY) rvFingerprint(sbn) else 0
             )
             if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
             // Cek-tuntas berjangkar ETA (tanpa ETA = fallback 45 mnt). Dijadwal ulang
@@ -1360,7 +1365,10 @@ class NotificationReaderService : NotificationListenerService() {
                                 // Update island yang sama — shouldAlertOnce=true agar tidak bunyi lagi
                                 postStandardNotification(capturedSbn, capturedBridgeId, updatedData, true)
                                 activeIslands[capturedEffectiveKey]?.let { old ->
-                                    activeIslands[capturedEffectiveKey] = old.copy(lastContentHash = updatedData.jsonParam.hashCode())
+                                    activeIslands[capturedEffectiveKey] = old.copy(
+                                        lastContentHash = updatedData.jsonParam.hashCode(),
+                                        rvHash = rvFingerprint(capturedSbn)
+                                    )
                                 }
                                 // ETA asli ketemu -> jadwal ulang cek-tuntas dengan jangkar yang benar.
                                 etaMinutesOrNull(rvEta)?.let { scheduleDeliveryEtaCheck(capturedEffectiveKey, it) }
@@ -1853,12 +1861,18 @@ class NotificationReaderService : NotificationListenerService() {
     private fun isAppAllowed(packageName: String): Boolean = allowedPackageSet.contains(packageName)
 
     /** Jalur Grab 1:1 — paket Grab asli ATAU REAL-clone bertanda Grab (Test screen). */
-    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {
-        if (sbn.packageName == "com.grabtaxi.passenger") return true
+    private fun isGrabPipeline(sbn: StatusBarNotification): Boolean {        if (sbn.packageName == "com.grabtaxi.passenger") return true
         if (sbn.packageName != packageName) return false
         val ex = sbn.notification.extras
         return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
             ex.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_PKG) == "com.grabtaxi.passenger"
+    }
+
+    /** Fingerprint isi RemoteViews (reflection 1-3ms, TANPA inflate) buat DELIVERY. */
+    private fun rvFingerprint(sbn: StatusBarNotification): Int {
+        return try {
+            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(sbn)?.hashCode() ?: 0
+        } catch (_: Exception) { 0 }
     }
 
     private var syncJob: Job? = null
