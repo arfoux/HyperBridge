@@ -14,6 +14,9 @@
 - Update beku sampai toggle: `f4ec859` + `81f1be7`, menunggu LIVE-1.
 - Desain pill/big island: `a091927`, verified via `miui.focus.param` JSON.
 - CI merah 2x (`isRealClone` scope, duplikat `pctLabel`): fixed, CI hijau.
+- Random respawn (Verdict wording lolos keyword): `4de5661` + ungate log + retry
+  (`5dad2b1`) — bukti 2026-09-21: `DELIVERY-FINISHED-SIBLING dismiss kitchen
+  by=Verdict`, pill zombie hilang dari shade, log keputusan tercatat tanpa toggle.
 - Sync rebind balapan daftar kosong: `788baa7` (retry 1d+4d), CI hijau.
 - Double pill tanpa konvergensi: `200c3a8` + `dac4919` (konvergensi dini), CI hijau.
 - Pelajaran 2026-09-20: (a) cek flag `debug_logging`/`save_real` DULU saat log sunyi
