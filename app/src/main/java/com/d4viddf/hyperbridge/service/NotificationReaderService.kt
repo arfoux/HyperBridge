@@ -857,6 +857,41 @@ class NotificationReaderService : NotificationListenerService() {
             ) {
                 effectiveTitle = getString(R.string.type_delivery)
             }
+            // Tile live Grab grafis minim-teks: pinjam judul+teks dari sibling
+            // Transaction BER-STAGE terbaru (100% extras, tanpa inflate). Tanpa ini
+            // pill RV-only kosong plong (cuma ETA).
+            if (effectiveText.isEmpty() && isGrabPipeline(sbn) &&
+                extras.getBoolean("android.contains.customView", false)
+            ) {
+                try {
+                    val donor = activeNotifications
+                        ?.filter { other ->
+                            other.packageName == sbn.packageName && other.key != sbn.key &&
+                                (other.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().isNotEmpty() ||
+                                    other.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty().isNotEmpty())
+                        }
+                        ?.maxByOrNull { it.postTime }
+                    if (donor != null) {
+                        val dTitle = donor.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim().orEmpty()
+                        val dText = donor.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.replace("\n", " ")?.trim().orEmpty()
+                        // Wajib pola stage order — promo/operasional/chat tidak boleh dipinjam.
+                        val dCorpus = "$dTitle $dText".lowercase()
+                        val staged = dCorpus.contains("preparing your order") || dCorpus.contains("in the kitchen") ||
+                            (dCorpus.contains("mencari") && dCorpus.contains("driver")) ||
+                            dCorpus.contains("finding driver") ||
+                            dCorpus.contains("is here") || dCorpus.contains("on the way") ||
+                            dCorpus.contains("on its way") || dCorpus.contains("arriving") ||
+                            dCorpus.contains("picked up") || dCorpus.contains("heading to") ||
+                            dCorpus.contains("heading your way") || dCorpus.contains("delivered") ||
+                            dCorpus.contains("order complete")
+                        if (staged && dTitle.isNotEmpty()) {
+                            effectiveTitle = dTitle
+                            if (dText.isNotEmpty()) effectiveText = dText
+                            Log.w(TAG, "BORROW-SIBLING pkg=${sbn.packageName} key=${sbn.key} from=${donor.key}")
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
 
             // [LOGIC] 2. State Preservation
             val key = sbn.key
