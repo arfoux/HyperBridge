@@ -1270,7 +1270,9 @@ class NotificationReaderService : NotificationListenerService() {
             }
             // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
             val newContentHash = data.jsonParam.hashCode()
-            if (isUpdate && previous != null && previous.lastContentHash == newContentHash) return
+            if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
+                (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
+            ) return
 
             // User/sistem baru saja dismiss konten identik -> jangan post ulang.
             if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
