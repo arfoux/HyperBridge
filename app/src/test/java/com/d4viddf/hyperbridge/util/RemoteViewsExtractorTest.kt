@@ -67,6 +67,12 @@ class RemoteViewsExtractorTest {
         )
         assertTrue(RemoteViewsExtractor.isDeliveryFinishedStrong("Selamat menikmati! Pastikan pesananmu sudah sesuai"))
         assertTrue(RemoteViewsExtractor.isDeliveryFinishedStrong("Beri penilaian untuk pesanan ini"))
+        // Varian Grab baru: "What's Your Verdict?" (order tuntas juga harus dismiss).
+        assertTrue(
+            RemoteViewsExtractor.isDeliveryFinishedStrong(
+                "What's Your Verdict? Tell us what you think about Burjo Titik Kumpul - Tembalang."
+            )
+        )
         // Tiba-di-tujuan BUKAN tuntas — pill harus tetap tampil 100%.
         assertFalse(RemoteViewsExtractor.isDeliveryFinishedStrong("Your order is here!"))
         assertFalse(RemoteViewsExtractor.isDeliveryFinishedStrong("Driver sudah tiba"))

@@ -61,6 +61,8 @@ object RemoteViewsExtractor {
             c.contains("enjoy your meal") || c.contains("enjoy your order") ||
             c.contains("did you enjoy your order") || c.contains("hear your feedback") ||
             c.contains("your feedback") ||
+            c.contains("verdict") || c.contains("tell us what you think") ||
+            c.contains("how would you rate") ||
             c.contains("delivered") ||
             c.contains("order complete") || c.contains("order completed") ||
             c.contains("rate your") || c.contains("how was your")
