@@ -559,7 +559,7 @@ class NotificationReaderService : NotificationListenerService() {
             noteDismissed(island.packageName, island.lastContentHash)
             cleanupCache(staleKey)
         }
-        if (stale.isNotEmpty() && debugLogEnabled()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+        if (stale.isNotEmpty()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
     }
 
     /** Catat konten yang di-dismiss agar repost identik yang lebih tua gugur. */
@@ -786,7 +786,7 @@ class NotificationReaderService : NotificationListenerService() {
                     if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
                     serviceScope.launch { preferences.toggleApp(it.packageName, true) }
                 } else {
-                    if (debugLogEnabled()) Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
+                    Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
                     return
                 }
             } else if (isRealClone && debugLogEnabled()) {
@@ -809,7 +809,7 @@ class NotificationReaderService : NotificationListenerService() {
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
                 // REAL-clone juga jangan dianggap junk: marker + liveId + title/text selalu non-empty.
                 if (isJunk && !isShopeeLive && !isRealClone) {
-                    if (debugLogEnabled()) Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
+                    Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
                     return@launch
                 }
                 if (isJunk && (isShopeeLive || isRealClone)) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for ${if (isRealClone) "REAL-CLONE" else "Shopee LIVE"} ${it.key}")
@@ -929,7 +929,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (isTestNotif) {
                 Log.w("HyperBridgeTest", "TEST pkg=${sbn.packageName} type=$type title='$effectiveTitle' text='$effectiveText' ch=${sbn.notification.channelId} tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
             } else {
-                if (debugLogEnabled()) Log.w("HyperBridgeDebug", "REAL pkg=${sbn.packageName} ch=${sbn.notification.channelId} type=$type title='$effectiveTitle' text='$effectiveText' tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
+                Log.w("HyperBridgeDebug", "REAL pkg=${sbn.packageName} ch=${sbn.notification.channelId} type=$type title='$effectiveTitle' text='$effectiveText' tpl=${extras.getString(Notification.EXTRA_TEMPLATE)} live=${extras.getString("extra_live_activity_id")} customView=${extras.getBoolean("android.contains.customView")}")
             }
             // Simpan ke history (50 terakhir, bedain isTest) — hormati toggle nonaktifin rekam REAL
             val shouldSave = isTestNotif || preferences.saveRealNotificationsSync()
@@ -1005,7 +1005,7 @@ class NotificationReaderService : NotificationListenerService() {
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                     } catch (_: Exception) {}
                     cleanupCache(key)
-                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key by=${finishedSibling.key}")
+                    Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key by=${finishedSibling.key}")
                     return
                 }
             }
@@ -1022,7 +1022,7 @@ class NotificationReaderService : NotificationListenerService() {
                     if (debugLogEnabled()) Log.w(TAG, "BYPASS effectiveTypes for ${sbn.packageName} DELIVERY: $effectiveTypes -> force allow (auto-enable)")
                     serviceScope.launch { preferences.updateAppConfig(sbn.packageName, NotificationType.DELIVERY, true) }
                 } else {
-                    if (debugLogEnabled()) Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
+                    Log.w(TAG, "ABORTING: Type $type disabled by user/theme for ${sbn.packageName} effective=$effectiveTypes")
                     return
                 }
             }
@@ -1071,7 +1071,7 @@ class NotificationReaderService : NotificationListenerService() {
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
                     } catch (_: Exception) {}
                     cleanupCache(dupeKey)
-                    if (debugLogEnabled()) Log.w(TAG, "DELIVERY-DEDUP cancel $dupeKey keep $key")
+                    Log.w(TAG, "DELIVERY-DEDUP cancel $dupeKey keep $key")
                 }
             }
 
@@ -1923,12 +1923,12 @@ class NotificationReaderService : NotificationListenerService() {
             try {
                 val currentNotifications = activeNotifications
                 if (currentNotifications.isNullOrEmpty()) {
-                    // Race pasca-bind: ranking sistem belum tersedia — coba lagi 1d & 4d.
+                    // Race pasca-bind: ranking sistem belum tersedia — coba lagi 1d, 4d, 15d.
                     // Tanpa ini order terlewat total sampai trigger berikutnya.
-                    if (retryCount < 2) {
-                        delay(if (retryCount == 0) 1000L else 4000L)
+                    if (retryCount < 3) {
+                        delay(if (retryCount == 0) 1000L else if (retryCount == 1) 4000L else 15000L)
                         syncNotifications(refresh, retryCount + 1)
-                    } else if (debugLogEnabled()) {
+                    } else {
                         Log.d(TAG, "Sync: empty active list after retries, giving up")
                     }
                     return@launch
