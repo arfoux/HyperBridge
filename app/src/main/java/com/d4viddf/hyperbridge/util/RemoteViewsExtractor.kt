@@ -35,7 +35,8 @@ object RemoteViewsExtractor {
                 corpus.contains("heading to") || corpus.contains("heading your way") -> 2
             corpus.contains("disiapkan") || corpus.contains("menyiapkan") ||
                 corpus.contains("diproses") || corpus.contains("in the kitchen") ||
-                corpus.contains("mencari driver") || corpus.contains("finding driver") ||
+                (corpus.contains("mencari") && corpus.contains("driver")) ||
+                corpus.contains("finding driver") ||
                 corpus.contains("preparing your order") || corpus.contains("preparing") -> 1
             else -> null
         }
@@ -81,7 +82,8 @@ object RemoteViewsExtractor {
                 lowerAll.contains("telah tiba") || lowerAll.contains("selesai") ||
                 lowerAll.contains("is here") || lowerAll.contains("delivered") -> 100
             // Awal order (cari driver) — persen kecil, pill muncul sejak awal.
-            lowerAll.contains("mencari driver") || lowerAll.contains("finding driver") -> 10
+            (lowerAll.contains("mencari") && lowerAll.contains("driver")) ||
+                lowerAll.contains("finding driver") -> 10
             lowerAll.contains("hampir tiba") || lowerAll.contains("menuju lokasi") ||
                 lowerAll.contains("diantar") || lowerAll.contains("dalam perjalanan") ||
                 lowerAll.contains("on the way") || lowerAll.contains("on its way") ||
