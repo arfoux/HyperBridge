@@ -924,7 +924,7 @@ class NotificationReaderService : NotificationListenerService() {
                 if (appBlockedTerms.any { term -> content.contains(term, ignoreCase = true) }) {
                     // Eligible Shopee delivery tetap lolos dari blockedTerms generic (voucher/promo sudah di-filter di detect)
                     if (!(isShopeeLiveEligible && appBlockedTerms.any { it.equals("shopee", true) })) {
-                        if (debugLogEnabled()) Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
+                        Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
                         return
                     }
                 }
@@ -1216,7 +1216,10 @@ class NotificationReaderService : NotificationListenerService() {
 
             if (!isUpdate && activeIslands.size >= MAX_ISLANDS) {
                 handleLimitReached(type, sbn.packageName)
-                if (activeIslands.size >= MAX_ISLANDS) return
+                if (activeIslands.size >= MAX_ISLANDS) {
+                    Log.d(TAG, "LIMIT-DROP pkg=${sbn.packageName} type=$type key=$key")
+                    return
+                }
             }
 
             val appIslandConfig = preferences.getAppIslandConfigSync(sbn.packageName)
@@ -1279,12 +1282,15 @@ class NotificationReaderService : NotificationListenerService() {
 
                 if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
                     (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
-                ) return
+                ) {
+                    Log.d(TAG, "DEDUP-SAME skip pkg=${sbn.packageName} key=$key type=$type")
+                    return
+                }
 
                 // User/sistem baru saja dismiss konten identik -> jangan post ulang.
                 // Test/clone dikecualikan agar replay stage di Test screen deterministik.
                 if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
-                    if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
+                    Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                     return
                 }
 
@@ -1330,11 +1336,14 @@ class NotificationReaderService : NotificationListenerService() {
             val newContentHash = data.jsonParam.hashCode()
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
                 (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
-            ) return
+            ) {
+                Log.d(TAG, "DEDUP-SAME skip pkg=${sbn.packageName} key=$key type=$type")
+                return
+            }
 
             // User/sistem baru saja dismiss konten identik -> jangan post ulang.
             if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
-                if (debugLogEnabled()) Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
+                Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                 return
             }
 
@@ -1946,7 +1955,7 @@ class NotificationReaderService : NotificationListenerService() {
     private var syncJob: Job? = null
 
     override fun onListenerConnected() { 
-        if (debugLogEnabled()) Log.i(TAG, "HyperBridge Service Connected")
+        Log.i(TAG, "HyperBridge Service Connected")
         syncNotifications(refresh = true)
     }
 
