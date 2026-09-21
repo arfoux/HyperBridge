@@ -7,6 +7,11 @@
 - **LIVE-2**: Penyebab delay ~10 menit pill awal order (06:42 → 06:52) belum pasti —
   kandidat: suppression grace dari swipe sebelumnya / missed `onNotificationPosted` /
   render tunda MIUI. Butuh capture kontinu saat order mulai.
+- **DEPLOY-1**: Install build borrow-fix (`04510cb`) tertunda — HP disconnect
+  (adb offline). APK lokal segar tersedia (build 07:01, sukses). Blocker: user
+  (buka scrcpy → balas `konek`).
+- **PROC-1**: Putusan user: build lokal untuk iterasi (CI final/rilis) — menggantikan
+  larangan lama. Alasan: download artifact CI macet berulang, build lokal 31-75 detik.
 
 ## Resolved
 - Pill tidak muncul (Feedback basi): `72124aa`, verified live 2026-09-19.
