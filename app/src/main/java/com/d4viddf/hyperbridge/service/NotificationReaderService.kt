@@ -1012,7 +1012,7 @@ class NotificationReaderService : NotificationListenerService() {
                     NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                 } catch (_: Exception) {}
                 cleanupCache(key)
-                if (debugLogEnabled()) Log.w(TAG, "DELIVERY-FINISHED dismiss pkg=${sbn.packageName} key=$key title='$effectiveTitle'")
+                Log.w(TAG, "DELIVERY-FINISHED dismiss pkg=${sbn.packageName} key=$key title='$effectiveTitle'")
                 return
             }
             // SELESAI bertipe lain + pill delivery aktif: bunuh pill, notif lanjut normal.
@@ -1087,7 +1087,7 @@ class NotificationReaderService : NotificationListenerService() {
                             NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
                         } catch (_: Exception) {}
                         cleanupCache(staleKey)
-                        if (debugLogEnabled()) Log.w(TAG, "DELIVERY-CONVERGE cancel $staleKey keep-newest")
+                        Log.w(TAG, "DELIVERY-CONVERGE cancel $staleKey keep-newest")
                     }
                 }
             }
@@ -1133,7 +1133,7 @@ class NotificationReaderService : NotificationListenerService() {
                         // key lama (postTime lebih kecil) datang belakangan dan harus skip.
                         val shownTime = deliveryContentTime[existingEntry.key]
                         if (shownTime != null && sbn.postTime < shownTime) {
-                            if (debugLogEnabled()) Log.w(TAG, "DELIVERY-STALE skip key=$key (older than shown) pkg=${sbn.packageName}")
+                            Log.w(TAG, "DELIVERY-STALE skip key=$key (older than shown) pkg=${sbn.packageName}")
                             return
                         }
                         val oldKey = existingEntry.key
@@ -1231,7 +1231,7 @@ class NotificationReaderService : NotificationListenerService() {
             val useLiveUpdates = getEffectiveEngine(sbn.packageName)
 
             if (useLiveUpdates) {
-                if (debugLogEnabled()) Log.i(TAG, " POSTING Native Live Update -> ID: $bridgeId, Type: $type")
+                Log.i(TAG, " POSTING Native Live Update -> ID: $bridgeId, Type: $type")
 
                 // [FIX] Fetch the user's custom layout so the Live Update can use it!
                 val navLayout = if (type == NotificationType.NAVIGATION) getEffectiveNav(sbn.packageName) else null
@@ -1359,7 +1359,7 @@ class NotificationReaderService : NotificationListenerService() {
 
             val shouldAlertOnce = isUpdate && (type == NotificationType.PROGRESS || type == NotificationType.DOWNLOAD || type == NotificationType.MEDIA)
 
-            if (debugLogEnabled()) Log.i(TAG, " POSTING Island -> ID: $bridgeId, Type: $type, FinalTitle: '$effectiveTitle', FinalText: '$effectiveText'")
+            Log.i(TAG, " POSTING Island -> ID: $bridgeId, Type: $type, FinalTitle: '$effectiveTitle', FinalText: '$effectiveText'")
             postStandardNotification(sbn, bridgeId, data, shouldAlertOnce)
 
             // subText menyimpan signature order DELIVERY (liveId / grab:pkg) agar
