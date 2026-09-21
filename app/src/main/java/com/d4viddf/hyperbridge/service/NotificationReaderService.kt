@@ -1016,11 +1016,23 @@ class NotificationReaderService : NotificationListenerService() {
                 return
             }
             // SELESAI bertipe lain + pill delivery aktif: bunuh pill, notif lanjut normal.
+            // Hanya pill yang LEBIH TUA dari sinyal tuntas — feedback basi kemarin
+            // tidak boleh membunuh pill order baru hari ini.
             if (type != NotificationType.DELIVERY &&
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus) &&
-                activeIslands.values.any { it.type == NotificationType.DELIVERY && it.packageName == sbn.packageName }
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
             ) {
-                dismissDeliveryPills(sbn.packageName)
+                val victims = activeIslands.entries.filter {
+                    it.value.type == NotificationType.DELIVERY && it.value.packageName == sbn.packageName &&
+                        (deliveryContentTime[it.key] ?: 0L) <= sbn.postTime
+                }
+                for ((victimKey, island) in victims) {
+                    try {
+                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
+                    } catch (_: Exception) {}
+                    noteDismissed(island.packageName, island.lastContentHash)
+                    cleanupCache(victimKey)
+                }
+                if (victims.isNotEmpty()) Log.w(TAG, "DELIVERY-FINISHED-OTHER dismiss ${victims.size} pill(s) pkg=${sbn.packageName} key=$key")
             }
             // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
             // lain ber-marker tuntas DAN lebih baru dari stage ini, postingan stage basi
