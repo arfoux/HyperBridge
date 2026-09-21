@@ -22,6 +22,10 @@
 - Random respawn (Verdict wording lolos keyword): `4de5661` + ungate log + retry
   (`5dad2b1`) — bukti 2026-09-21: `DELIVERY-FINISHED-SIBLING dismiss kitchen
   by=Verdict`, pill zombie hilang dari shade, log keputusan tercatat tanpa toggle.
+- Sinyal tuntas basi bunuh pill segar: `1082ebf` — bukti 2026-09-21 07:49 burst:
+  onway POSTING, kitchen STALE-skip (single pill), Verdict basi DIABAIKAN
+  (tanpa FINISHED-OTHER), 1 pill berdiri. Sed palsu: 5 sed ungate gagal diam-diam,
+  diperbaiki via edit (`7820127`) — pelajaran: verifikasi tiap hasil sed.
 - Sync rebind balapan daftar kosong: `788baa7` (retry 1d+4d), CI hijau.
 - Double pill tanpa konvergensi: `200c3a8` + `dac4919` (konvergensi dini), CI hijau.
 - Pelajaran 2026-09-20: (a) cek flag `debug_logging`/`save_real` DULU saat log sunyi
