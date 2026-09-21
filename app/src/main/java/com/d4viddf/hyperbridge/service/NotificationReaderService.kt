@@ -1445,7 +1445,7 @@ class NotificationReaderService : NotificationListenerService() {
             handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, false, sbn, effectiveTitle, effectiveText)
 
         } catch (e: Exception) {
-            if (debugLogEnabled()) Log.e(TAG, "💥 Error processing standard notification", e)
+            Log.e(TAG, "💥 Error processing standard notification", e)
         }
     }
 
@@ -2077,9 +2077,9 @@ class NotificationReaderService : NotificationListenerService() {
                     islandPresent,
                     refresh
                 )
-            } catch (e: Exception) {
-                if (debugLogEnabled()) Log.e(TAG, "Error syncing notifications", e)
-            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error syncing notifications", e)
+        }
         }
     }
 
