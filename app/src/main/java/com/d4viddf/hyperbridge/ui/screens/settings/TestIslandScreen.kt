@@ -226,6 +226,57 @@ fun TestIslandScreen(onBack: () -> Unit) {
                             TestNotificationHelper.cancelRealGrabClones(context)
                         }, modifier = Modifier.fillMaxWidth()) { Text("Cancel Grab") }
                         Spacer(Modifier.height(8.dp))
+                        Text(
+                            "HISTORY REPLAY 1:1 (string persis logcat REAL kemarin).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Grab Trans ONWAY (Burjo)",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(onClick = {
+                                TestNotificationHelper.postHistoryGrabTransaction(context)
+                            }) { Text("Post") }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Grab Live RV + ETA",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(onClick = {
+                                TestNotificationHelper.postHistoryGrabLiveEta(context)
+                            }) { Text("Post") }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Shopee MENUJU (MOMOYO)",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(onClick = {
+                                TestNotificationHelper.postHistoryShopeeMenuju(context)
+                            }) { Text("Post") }
+                        }
+                        Spacer(Modifier.height(8.dp))
                         Button(onClick = {
                             try {
                                 val component = android.content.ComponentName(

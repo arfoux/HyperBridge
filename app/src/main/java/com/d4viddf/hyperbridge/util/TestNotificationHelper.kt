@@ -136,6 +136,7 @@ object TestNotificationHelper {
     fun cancelRealClones(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         DeliveryStage.entries.forEach { nm.cancel(REAL_BASE_ID + it.ordinal) }
+        nm.cancel(REAL_BASE_ID + 10)
         android.util.Log.w("HyperBridgeTest", "CANCELED REAL-CLONES")
     }
 
@@ -231,7 +232,85 @@ object TestNotificationHelper {
         val nm = context.getSystemService(NotificationManager::class.java)
         GrabStage.entries.forEach { nm.cancel(REAL_GRAB_BASE_ID + it.ordinal) }
         nm.cancel(REAL_GRAB_BASE_ID + 10)
+        nm.cancel(REAL_GRAB_BASE_ID + 20)
+        nm.cancel(REAL_GRAB_BASE_ID + 21)
         android.util.Log.w("HyperBridgeTest", "CANCELED REAL-GRAB-CLONES")
+    }
+
+    // ========================================================================
+    //  HISTORY REPLAY 1:1 — string persis dari logcat REAL (bukan fabrikasi).
+    //  Grab: order Burjo Titik Kumpul 2026-09-22 (title/text/channel/color 1:1).
+    //  Shopee: order shopee_food_orders_3252064997935104326 (MOMOYO, Tiba 20:25).
+    // ========================================================================
+
+    /** Grab Transaction ONWAY kemarin: title 'Grab' + teks 224char + warna Grab. */
+    fun postHistoryGrabTransaction(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel("Transaction", "Grab Transaction (history replay)", NotificationManager.IMPORTANCE_HIGH))
+        val text = "Your order from Burjo Titik Kumpul - Tembalang is on the way to you. Provide your floor or unit number to your driver if applicable."
+        val builder = NotificationCompat.Builder(context, "Transaction")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Grab")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setColor(0xff00b14f.toInt())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(dummyPendingIntent(context, 9220))
+        val notif = builder.build()
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, "HIST_GRAB_ONWAY")
+        notif.extras.putString(EXTRA_REAL_PKG, "com.grabtaxi.passenger")
+        nm.notify(REAL_GRAB_BASE_ID + 20, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED HIST-GRAB-TRANSACTION onway Burjo")
+    }
+
+    /** Grab live-activity RV-only kemarin: extras kosong + RV bawa ETA "Tiba 16:26". */
+    fun postHistoryGrabLiveEta(context: Context) {
+        val chId = "live_activity_channel_01"
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(chId, "Live Activity (history replay)", NotificationManager.IMPORTANCE_HIGH))
+        val rv = android.widget.RemoteViews(context.packageName, android.R.layout.simple_list_item_1)
+        // "Tiba dalam 7 menit" (bukan "Tiba 16:26" kemarin — jam sudah lewat,
+        // single-time dihitung dari sekarang; menit tertulis stabil kapan pun).
+        rv.setTextViewText(android.R.id.text1, "Burjo Titik Kumpul - Tembalang is on the way to you. Tiba dalam 7 menit")
+        val builder = NotificationCompat.Builder(context, chId)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(rv)
+            .setColor(0xff009d3b.toInt())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(dummyPendingIntent(context, 9221))
+        val notif = builder.build()
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, "HIST_GRAB_LIVE_ETA")
+        notif.extras.putString(EXTRA_REAL_PKG, "com.grabtaxi.passenger")
+        notif.extras.putBoolean("android.contains.customView", true)
+        nm.notify(REAL_GRAB_BASE_ID + 21, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED HIST-GRAB-LIVE-ETA rv=Tiba dalam 7 menit")
+    }
+
+    /** Shopee MENUJU (MOMOYO + Tiba pada 20:25): latihan jalur ETA extras. */
+    fun postHistoryShopeeMenuju(context: Context) {
+        ensureRealChannel(context)
+        val title = "Driver sedang menuju Resto"
+        val text = "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang • Tiba pada 20:25"
+        val builder = NotificationCompat.Builder(context, REAL_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setContentIntent(dummyPendingIntent(context, 9120))
+        val notif = builder.build()
+        notif.extras.putString("extra_live_activity_id", "shopee_food_orders_3252064997935104326")
+        notif.extras.putBoolean(EXTRA_REAL_CLONE, true)
+        notif.extras.putString(EXTRA_REAL_STAGE, "HIST_SHOPEE_MENUJU")
+        nm.notify(REAL_BASE_ID + 10, notif)
+        android.util.Log.w("HyperBridgeTest", "POSTED HIST-SHOPEE-MENUJU momoyo")
     }
 
     /**

@@ -141,16 +141,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty(),
         )
         var eta = forcedEta?.takeIf { it.isNotBlank() } ?: ""
-        // Raw dari sumber yang sama dengan olahan (konsisten pill vs big island).
-        var etaRaw: String? = if (eta.isNotEmpty() && forcedRvCorpus != null) {
-            runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaRaw(forcedRvCorpus) }.getOrNull()
-        } else null
         if (eta.isEmpty()) {
             for (src in etaCorpus) {
                 val e = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(src) }.getOrNull()?.takeIf(String::isNotBlank)
                 if (e != null) {
                     eta = e
-                    etaRaw = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaRaw(src) }.getOrNull()
                     break
                 }
             }
@@ -159,9 +154,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Jalur utama (pill awal) 0ms: tidak sentuh RemoteViews sama sekali.
         if (eta.isEmpty() && forcedRvCorpus != null) {
             eta = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(forcedRvCorpus) }.getOrNull() ?: ""
-            if (eta.isNotEmpty()) {
-                etaRaw = runCatching { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaRaw(forcedRvCorpus) }.getOrNull()
-            }
         }
         // Legacy sync fallback dimatikan untuk 0ms pill.
         // if (eta.isEmpty() && extras.getBoolean("android.contains.customView", false)) {
@@ -184,6 +176,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // sumber kebenaran: RemoteViewsExtractor).
         val stageCorpus = "$title $text $rvExtra"
         val keywordStage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
+        // Nama resto (Grab EN) + label waktu mentah — dipakai shade (detail) agar
+        // pill tetap minimal. Contoh REAL: "Your order from Burjo Titik Kumpul -
+        // Tembalang is on the way to you."
+        val restoShort = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(stageCorpus)
+            ?.substringBefore(" - ")?.trim()?.takeIf { it.isNotEmpty() }
         // Ori bawa angka progress (mis. garis 50%) tapi teks masih stage awal
         // ("In the kitchen"): stage pill = tertinggi keyword vs angka — pill tak ketinggalan.
         val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
@@ -275,7 +272,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 5. Shade Layout (Standard Template)
         builder.setBaseInfo(
             type = 1,
-            title = title,
+            // Grab: judul resto; Shopee: judul extras. Isi = teks apa adanya.
+            title = if (isGrab) restoShort ?: title else title,
             content = text,
             pictureKey = coverKey,
             actionKeys = actionKeys
@@ -311,24 +309,16 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Big island penuh info murah (100% extras, nol cost tambahan):
-        //    kiri = logo + judul stage + teks status lengkap (nama resto ikut tampil),
-        //    kanan = TEKS ETA saja ("48mnt") + persen, TANPA logo pin.
+        // 7. Belah 2 per aplikasi (spek final): kiri = logo + JUDUL PENUH +
+        //    baris 2 kosong; kanan = ETA 1 baris TANPA pic; ring = progres +
+        //    warna tema (oranye Shopee, hijau Grab).
         // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
         // Kosong = pinjam ETA terakhir order yang sama (shownEta).
         val etaShort = shownEta.replace(" menit", "mnt")
         val islandPct = progressPercent ?: percent.takeIf { hasProgress } ?: ((stage ?: 0) * 100 / 3)
-        // Kanan big island: waktu MENTAH ("Tiba 07.25 - 07.40"); pill tetap olahan ("15mnt").
-        // Mentah bare (angka doang) diberi awalan "Tiba " agar kebaca.
-        val etaRawLabel = etaRaw?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            if (it.first().isLetter()) it else "Tiba $it"
-        }
-        val pctLabel = islandPct.takeIf { it > 0 }?.let { "$it%" }
-        // Judul stage ringkas buat kiri pill; konten = teks status penuh (resto dsb).
-        // Generik ("Food & Delivery") tetap ditampilkan agar tak kosong plong.
-        val stageTitle = title.take(24)
-        // Kiri pill = logoKey (Grab = motor hijau hardcode, Shopee = logo hardcode).
-        // Kanan = teks ETA + persen; lingkaran progres nempel di kiri (pola kit Template 7).
+        val bigTitle = if (isGrab) restoShort ?: title else title
+        // Kiri = logo motor per aplikasi + judul penuh, baris 2 kosong.
+        // Kanan = ETA 1 baris tanpa pic. Ring nempel di kiri.
         val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"
         if (isGrab) {
             builder.addPicture(grabBikePicture("delivery_mini_bike"))
@@ -342,12 +332,11 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             left = ImageTextInfoLeft(
                 type = 1,
                 picInfo = PicInfo(type = 1, pic = leftPicKey),
-                textInfo = TextInfo(stageTitle, text.take(120))
+                textInfo = TextInfo(bigTitle, "")
             ),
             right = ImageTextInfoRight(
                 type = 2,
-                picInfo = PicInfo(type = 1, pic = "hidden_pixel"),
-                textInfo = TextInfo(etaShort, etaRawLabel ?: pctLabel)
+                textInfo = TextInfo(etaShort, "")
             ),
             progressText = ProgressTextInfo(
                 progressInfo = CircularProgressInfo(

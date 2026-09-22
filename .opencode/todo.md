@@ -19,6 +19,9 @@
 - [x] (completed) Bukti render final: ETA `15mnt` + `Tiba 13:55 - 14:10` + resto di JSON (adb)
 
 ## Menunggu order berikutnya (butuh live order, tidak bisa diuji tanpa itu)
+- [x] (completed) Fase 0 order 2026-09-21: build 5dad2b1 terinstall, listener bound,
+  capture jalan, baseline tercatat, 1 pill live (`202810785`, ETA `15mnt` via async RV,
+  kitchen merge tanpa double)
 - [ ] Uji swipe: Post KITCHEN → swipe → kunci/buka → pill tidak balik (`SUPPRESSED-SWIPE`)
 - [ ] Uji konten baru: Post ONWAY → pill muncul lagi
 - [ ] Uji FEEDBACK: semua pill Grab hilang (dismiss benar)

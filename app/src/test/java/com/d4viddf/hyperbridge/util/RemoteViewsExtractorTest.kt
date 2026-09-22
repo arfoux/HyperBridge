@@ -106,4 +106,33 @@ class RemoteViewsExtractorTest {
         assertEquals("25 menit", RemoteViewsExtractor.extractEtaRaw("Driver tiba, 25 menit lagi"))
         assertNull(RemoteViewsExtractor.extractEtaRaw("Burjo Titik Kumpul - Tembalang is here!"))
     }
+
+    @Test
+    fun resto_realGrabSamples() {
+        // Sampel REAL logcat 2026-09-22 (Burjo Titik Kumpul - Tembalang).
+        assertEquals(
+            "Burjo Titik Kumpul - Tembalang",
+            RemoteViewsExtractor.extractRestoName(
+                "Your order from Burjo Titik Kumpul - Tembalang is on the way to you. " +
+                    "Provide your floor or unit number to your driver if applicable."
+            )
+        )
+        assertEquals(
+            "Burjo Titik Kumpul - Tembalang",
+            RemoteViewsExtractor.extractRestoName(
+                "Burjo Titik Kumpul - Tembalang is preparing your order. Tap to see details."
+            )
+        )
+        assertEquals(
+            "Burjo Titik Kumpul - Tembalang",
+            RemoteViewsExtractor.extractRestoName(
+                "Your order from Burjo Titik Kumpul - Tembalang is here! If there are any " +
+                    "issues with your order, share it with us within 12 hours upon receiving it."
+            )
+        )
+        // Tanpa pola resto -> null (perilaku lama tak berubah).
+        assertNull(RemoteViewsExtractor.extractRestoName("Your order is on the way to you"))
+        assertNull(RemoteViewsExtractor.extractRestoName("Ada diskon s.d. 50% di GrabMart!"))
+        assertNull(RemoteViewsExtractor.extractRestoName("Food & Delivery"))
+    }
 }

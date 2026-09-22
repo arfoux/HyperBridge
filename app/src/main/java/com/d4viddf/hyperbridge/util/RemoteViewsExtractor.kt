@@ -100,6 +100,33 @@ object RemoteViewsExtractor {
     }
 
     // ========================================================================
+    //  NAMA RESTO (Grab EN: "Your order from X is ..." / "X is preparing ...")
+    //  Sampel REAL 2026-09-22: "Your order from Burjo Titik Kumpul - Tembalang
+    //  is on the way to you.", "Burjo Titik Kumpul - Tembalang is preparing
+    //  your order. Tap to see details."
+    // ========================================================================
+
+    private val restoFromRegex = Regex(
+        "your order from\\s+(.+?)\\s+is\\s+(?:on the way|on its way|here|arriving|almost here)",
+        RegexOption.IGNORE_CASE
+    )
+    private val restoPreparingRegex = Regex(
+        "^\\s*(.+?)\\s+is preparing your order",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Nama resto/merchant dari teks order Grab, atau null bila tak berpola. */
+    fun extractRestoName(corpusRaw: String): String? {
+        restoFromRegex.find(corpusRaw)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= 80 && !it.contains(".") }
+            ?.let { return it }
+        restoPreparingRegex.find(corpusRaw)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= 80 && !it.contains(".") }
+            ?.let { return it }
+        return null
+    }
+
+    // ========================================================================
     //  REMOTEVIEWS FALLBACK (tanpa inflate) — dipakai setelah pill muncul
     //  agar pill tetap instan (0ms block). Reflection mActions = 1-3ms.
     // ========================================================================

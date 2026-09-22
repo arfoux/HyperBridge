@@ -786,7 +786,7 @@ class NotificationReaderService : NotificationListenerService() {
                     if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
                     serviceScope.launch { preferences.toggleApp(it.packageName, true) }
                 } else {
-                    Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
+                    if (debugLogEnabled()) Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
                     return
                 }
             } else if (isRealClone && debugLogEnabled()) {
@@ -809,7 +809,7 @@ class NotificationReaderService : NotificationListenerService() {
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
                 // REAL-clone juga jangan dianggap junk: marker + liveId + title/text selalu non-empty.
                 if (isJunk && !isShopeeLive && !isRealClone) {
-                    Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
+                    if (debugLogEnabled()) Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
                     return@launch
                 }
                 if (isJunk && (isShopeeLive || isRealClone)) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for ${if (isRealClone) "REAL-CLONE" else "Shopee LIVE"} ${it.key}")
@@ -924,7 +924,7 @@ class NotificationReaderService : NotificationListenerService() {
                 if (appBlockedTerms.any { term -> content.contains(term, ignoreCase = true) }) {
                     // Eligible Shopee delivery tetap lolos dari blockedTerms generic (voucher/promo sudah di-filter di detect)
                     if (!(isShopeeLiveEligible && appBlockedTerms.any { it.equals("shopee", true) })) {
-                        Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
+                        if (debugLogEnabled()) Log.w(TAG, "BLOCKED by appBlockedTerms for ${sbn.packageName}: $content")
                         return
                     }
                 }
@@ -1959,6 +1959,11 @@ class NotificationReaderService : NotificationListenerService() {
 
     /** Fingerprint isi RemoteViews (reflection 1-3ms, TANPA inflate) buat DELIVERY. */
     private fun rvFingerprint(sbn: StatusBarNotification): Int {
+        // Tanpa view RV tak ada korpus — langsung 0, jangan reflection per post.
+        if (!sbn.notification.extras.getBoolean("android.contains.customView", false) &&
+            sbn.notification.contentView == null && sbn.notification.bigContentView == null &&
+            sbn.notification.headsUpContentView == null
+        ) return 0
         return try {
             com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpus(sbn)?.hashCode() ?: 0
         } catch (_: Exception) { 0 }
