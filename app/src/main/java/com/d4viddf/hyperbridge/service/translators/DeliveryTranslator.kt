@@ -29,6 +29,32 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         private val lastEtaByOrder = java.util.concurrent.ConcurrentHashMap<String, String>()
         /** Order terakhir per package — agar repost tanpa liveId tetap nempel ke order yang sama. */
         private val lastOrderByPkg = java.util.concurrent.ConcurrentHashMap<String, String>()
+        /** Nama resto terakhir per package — pill live-activity Grab (extras null) tanpa
+         *  korpus resto pakai cache ini. Diisi service dari SEMUA notif order (Transaction/
+         *  chat) SEBELUM gate tuntas/batal — notif stage bisa mati sebelum translate. */
+        private data class RestoMem(val name: String, val at: Long)
+        private val lastRestoByPkg = java.util.concurrent.ConcurrentHashMap<String, RestoMem>()
+        private const val RESTO_TTL_MS = 6 * 60 * 60 * 1000L
+
+        /** Simpan nama resto dari korpus order (null = tak berpola, jangan timpa ingatan). */
+        @JvmStatic
+        fun rememberResto(pkg: String, name: String?) {
+            if (name.isNullOrBlank()) return
+            val clean = name.trim().takeIf { it.isNotEmpty() && it.length <= 80 && !it.contains(".") } ?: return
+            lastRestoByPkg[pkg] = RestoMem(clean, System.currentTimeMillis())
+        }
+
+        /** Resto terakhir yang masih valid (TTL 6 jam), atau null. */
+        @JvmStatic
+        fun peekResto(pkg: String): String? {
+            val mem = lastRestoByPkg[pkg] ?: return null
+            if (System.currentTimeMillis() - mem.at > RESTO_TTL_MS) {
+                lastRestoByPkg.remove(pkg)
+                return null
+            }
+            return mem.name
+        }
+
         /** Cache ikon app Grab (PackageManager) — dibaca sekali per proses. */
         /** Kunci order selesai: stage 3 / "selamat menikmati" menghapus ingatan ETA order itu. */
         private fun isFinishedStage(stage: Int?, corpus: String): Boolean {
@@ -84,7 +110,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
     ): HyperIslandData {
 
         // 1. Resolve Theme Colors — hijau Grab untuk GrabFood, oranye Shopee default.
-        val themeColor = if (isGrabPipeline(sbn)) "#00B14F"
+        val isGrab = isGrabPipeline(sbn)
+        val themeColor = if (isGrab) "#00B14F"
             else resolveColor(theme, sbn.packageName, "#EE4D2D") // Shopee orange-ish default
 
         // 2. Parse Notification Content — fallback chain: ambil semua data eligible
@@ -167,10 +194,13 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Jalur RV disediakan via forcedRvCorpus oleh caller async (NotificationReaderService);
         // di sini title/text/RV digabung jadi satu korpus agar stage+ETA tetap kep baca.
         val rvExtra = forcedRvCorpus.orEmpty()
-        if (title.isEmpty() && text.isEmpty() && rvExtra.isNotBlank()) {
-            // Judul pill/shade generik; detail stage tetap dari korpus RV via stage/ETA di bawah.
-            title = context.getString(R.string.type_delivery)
+        // Isi shade dari korpus RV bila teks extras kosong (Grab live-activity: title sudah
+        // keisi generik "Food & Delivery" tapi text tetap kosong — korpus RV = satu-satunya isi).
+        if (text.isEmpty() && rvExtra.isNotBlank()) {
             text = rvExtra.take(160)
+        }
+        if (title.isEmpty() && rvExtra.isNotBlank()) {
+            title = context.getString(R.string.type_delivery)
         }
         // Stage driver-resto-tujuan dari title+text extras (+RV Grab bila ada,
         // sumber kebenaran: RemoteViewsExtractor).
@@ -178,9 +208,12 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         val keywordStage = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(stageCorpus)
         // Nama resto (Grab EN) + label waktu mentah — dipakai shade (detail) agar
         // pill tetap minimal. Contoh REAL: "Your order from Burjo Titik Kumpul -
-        // Tembalang is on the way to you."
+        // Tembalang is on the way to you." Judul penuh (spek final) = nama utuh.
         val restoShort = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(stageCorpus)
-            ?.substringBefore(" - ")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.trim()?.takeIf { it.isNotEmpty() }
+        // Live-activity Grab tak bawa resto di korpusnya — pinjam ingatan terakhir
+        // dari Transaction/chat order yang sama (diisi service sebelum gate apa pun).
+        val cachedResto = restoShort ?: if (isGrab) peekResto(sbn.packageName) else null
         // Ori bawa angka progress (mis. garis 50%) tapi teks masih stage awal
         // ("In the kitchen"): stage pill = tertinggi keyword vs angka — pill tak ketinggalan.
         val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
@@ -223,7 +256,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Pill pendek: ticker = ETA ringkas ("14mnt"), fallback judul bila ETA kosong.
         // ETA kosong = ETA terakhir order yang sama (sampai ada waktu baru / stage selesai).
         // Judul+teks lengkap tetap tampil di shade via setBaseInfo di bawah.
-        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", shownEta.replace(" menit", "mnt").ifEmpty { title })
+        val builder = HyperIslandNotification.Builder(context, "bridge_${sbn.packageName}", shownEta.replace(" menit", "mnt").ifEmpty { cachedResto ?: title })
         builder.setEnableFloat(config.isFloat ?: false)
         builder.setShowNotification(config.isShowShade ?: true)
         builder.setIslandFirstFloat(config.isFloat ?: false)
@@ -232,7 +265,6 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // hemat decode bitmap per update). Shopee: logo ShopeeFood hardcode
         // (largeIcon Shopee tak pernah ada di dump, jadi Shopee juga hardcode).
         val logoKey = "${picKey}_logo"
-        val isGrab = isGrabPipeline(sbn)
         if (isGrab) {
             builder.addPicture(grabBikePicture(logoKey))
         } else {
@@ -272,8 +304,8 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // 5. Shade Layout (Standard Template)
         builder.setBaseInfo(
             type = 1,
-            // Grab: judul resto; Shopee: judul extras. Isi = teks apa adanya.
-            title = if (isGrab) restoShort ?: title else title,
+            // Grab: judul resto (cache live-activity fallback); Shopee: judul extras. Isi = teks apa adanya.
+            title = if (isGrab) cachedResto ?: title else title,
             content = text,
             pictureKey = coverKey,
             actionKeys = actionKeys
@@ -316,7 +348,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Kosong = pinjam ETA terakhir order yang sama (shownEta).
         val etaShort = shownEta.replace(" menit", "mnt")
         val islandPct = progressPercent ?: percent.takeIf { hasProgress } ?: ((stage ?: 0) * 100 / 3)
-        val bigTitle = if (isGrab) restoShort ?: title else title
+        val bigTitle = if (isGrab) cachedResto ?: title else title
         // Kiri = logo motor per aplikasi + judul penuh, baris 2 kosong.
         // Kanan = ETA 1 baris tanpa pic. Ring nempel di kiri.
         val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"

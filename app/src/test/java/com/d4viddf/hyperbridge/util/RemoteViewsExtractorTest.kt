@@ -108,6 +108,19 @@ class RemoteViewsExtractorTest {
     }
 
     @Test
+    fun deliveryStage_grabLiveActivityCorpus_isOne() {
+        // Korpus RV REAL Grab live-activity 2026-09-23 (Burjo, order baru).
+        assertEquals(
+            1,
+            RemoteViewsExtractor.deliveryStage("07:10 - 07:25 On time · We've got your order 07:10 - 07:25")
+        )
+        assertEquals(
+            15,
+            RemoteViewsExtractor.deliveryPercent(1, "07:10 - 07:25 On time · We've got your order 07:10 - 07:25")
+        )
+    }
+
+    @Test
     fun resto_realGrabSamples() {
         // Sampel REAL logcat 2026-09-22 (Burjo Titik Kumpul - Tembalang).
         assertEquals(

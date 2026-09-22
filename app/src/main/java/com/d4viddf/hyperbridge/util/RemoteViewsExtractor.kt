@@ -37,7 +37,9 @@ object RemoteViewsExtractor {
                 corpus.contains("diproses") || corpus.contains("in the kitchen") ||
                 (corpus.contains("mencari") && corpus.contains("driver")) ||
                 corpus.contains("finding driver") ||
-                corpus.contains("preparing your order") || corpus.contains("preparing") -> 1
+                corpus.contains("preparing your order") || corpus.contains("preparing") ||
+                // Grab live-activity korpus RV: "07:10 - 07:25 On time · We've got your order ..."
+                corpus.contains("we've got your order") || corpus.contains("we’ve got your order") -> 1
             else -> null
         }
     }
@@ -94,7 +96,8 @@ object RemoteViewsExtractor {
                 lowerAll.contains("menuju") -> 35
             lowerAll.contains("disiapkan") || lowerAll.contains("menyiapkan") ||
                 lowerAll.contains("diproses") || lowerAll.contains("in the kitchen") ||
-                lowerAll.contains("preparing") -> 15
+                lowerAll.contains("preparing") || lowerAll.contains("we've got your order") ||
+                lowerAll.contains("we’ve got your order") -> 15
             else -> (stage * 100) / 3
         }
     }

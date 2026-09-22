@@ -864,19 +864,12 @@ class NotificationReaderService : NotificationListenerService() {
                 extras.getBoolean("android.contains.customView", false)
             ) {
                 try {
-                    val donor = activeNotifications
-                        ?.filter { other ->
-                            other.packageName == sbn.packageName && other.key != sbn.key &&
-                                (other.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().isNotEmpty() ||
-                                    other.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty().isNotEmpty())
-                        }
-                        ?.maxByOrNull { it.postTime }
-                    if (donor != null) {
-                        val dTitle = donor.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim().orEmpty()
-                        val dText = donor.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.replace("\n", " ")?.trim().orEmpty()
-                        // Wajib pola stage order — promo/operasional/chat tidak boleh dipinjam.
-                        val dCorpus = "$dTitle $dText".lowercase()
-                        val staged = dCorpus.contains("preparing your order") || dCorpus.contains("in the kitchen") ||
+                    // Wajib pola stage order — promo/operasional tidak boleh dipinjam.
+                    // Filter staged DULU lalu maxBy: kandidat terbaru yang staged menang,
+                    // bukan kandidat terbaru saja (promo lebih baru = borrow mati).
+                    fun isStaged(corpusRaw: String): Boolean {
+                        val dCorpus = corpusRaw.lowercase()
+                        return dCorpus.contains("preparing your order") || dCorpus.contains("in the kitchen") ||
                             (dCorpus.contains("mencari") && dCorpus.contains("driver")) ||
                             dCorpus.contains("finding driver") ||
                             dCorpus.contains("is here") || dCorpus.contains("on the way") ||
@@ -884,13 +877,40 @@ class NotificationReaderService : NotificationListenerService() {
                             dCorpus.contains("picked up") || dCorpus.contains("heading to") ||
                             dCorpus.contains("heading your way") || dCorpus.contains("delivered") ||
                             dCorpus.contains("order complete")
-                        if (staged && dTitle.isNotEmpty()) {
+                    }
+                    val donor = activeNotifications
+                        ?.filter { other ->
+                            if (other.packageName != sbn.packageName || other.key == sbn.key) return@filter false
+                            val dTitle = other.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                            val dText = other.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+                            dTitle.isNotEmpty() && isStaged("$dTitle $dText")
+                        }
+                        ?.maxByOrNull { it.postTime }
+                    if (donor != null) {
+                        val dTitle = donor.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.replace("\n", " ")?.trim().orEmpty()
+                        val dText = donor.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.replace("\n", " ")?.trim().orEmpty()
+                        if (dTitle.isNotEmpty()) {
                             effectiveTitle = dTitle
                             if (dText.isNotEmpty()) effectiveText = dText
                             Log.w(TAG, "BORROW-SIBLING pkg=${sbn.packageName} key=${sbn.key} from=${donor.key}")
                         }
                     }
                 } catch (_: Exception) {}
+            }
+
+            // Nama resto Grab: ingat dari SEMUA korpus order (Transaction "on the way" /
+            // "In the kitchen" / chat "is here") SEBELUM gate tuntas/batal — pill
+            // live-activity (extras null, korpus tanpa resto) pakai cache ini sebagai judul.
+            if (isGrabPipeline(sbn)) {
+                val restoCorpus = "$effectiveTitle $effectiveText " + listOf(
+                    extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
+                    extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
+                    extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+                ).joinToString(" ")
+                com.d4viddf.hyperbridge.service.translators.DeliveryTranslator.rememberResto(
+                    sbn.packageName,
+                    com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(restoCorpus)
+                )
             }
 
             // [LOGIC] 2. State Preservation
