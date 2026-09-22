@@ -295,6 +295,7 @@ object TestNotificationHelper {
     /** Shopee MENUJU (MOMOYO + Tiba pada 20:25): latihan jalur ETA extras. */
     fun postHistoryShopeeMenuju(context: Context) {
         ensureRealChannel(context)
+        val nm = context.getSystemService(NotificationManager::class.java)
         val title = "Driver sedang menuju Resto"
         val text = "Driver sedang menuju ke Resto - MOMOYO Ice Cream - Rembang • Tiba pada 20:25"
         val builder = NotificationCompat.Builder(context, REAL_CHANNEL_ID)
