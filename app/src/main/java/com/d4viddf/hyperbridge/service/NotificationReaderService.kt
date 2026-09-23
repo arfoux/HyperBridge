@@ -101,6 +101,9 @@ class NotificationReaderService : NotificationListenerService() {
     // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
     // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
     private val deliveryContentTime = ConcurrentHashMap<String, Long>()
+    // Sinyal order tuntas (Feedback/rating) per paket — pill boleh belum ada saat
+    // sinyal diproses (urutan sync); stage menyusul wajib ikut dibunuh.
+    private val pendingDeliveryFinished = ConcurrentHashMap<String, Long>()
     // Timer cek-tuntas berjangkar ETA: 1 job per pill delivery (custom path saja).
     private val deliveryEtaJobs = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
@@ -547,6 +550,11 @@ class NotificationReaderService : NotificationListenerService() {
             reverseTranslations.remove(hyperId)
         }
         updatePermanentIsland()
+    }
+
+    /** Buang sinyal tuntas basi (>6 jam) agar order baru tak kena sisa feedback lama. */
+    private fun prunePendingDeliveryFinished(now: Long) {
+        pendingDeliveryFinished.entries.removeIf { now - it.value > 6 * 60 * 60_000L }
     }
 
     /** Ada RemoteViews di notif (korpus bisa beda walau extras/contentHash sama). */
@@ -1073,6 +1081,9 @@ class NotificationReaderService : NotificationListenerService() {
             if (type != NotificationType.DELIVERY &&
                 com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
             ) {
+                // Ingate sinyal tuntas walau pill belum ada (urutan sync: Feedback
+                // diproses duluan, stage "is here" menyusul — pill harus ikut bunuh).
+                pendingDeliveryFinished.merge(sbn.packageName, sbn.postTime, ::maxOf)
                 val victims = activeIslands.entries.filter {
                     if (it.value.type != NotificationType.DELIVERY || it.value.packageName != sbn.packageName) return@filter false
                     val contentTime = deliveryContentTime[it.key] ?: 0L
@@ -1093,23 +1104,28 @@ class NotificationReaderService : NotificationListenerService() {
             // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
             // lain ber-marker tuntas DAN lebih baru dari stage ini, postingan stage basi
             // ini gugur — dismiss + skip.
-            // Syarat postTime: feedback/rating order LAMA (lebih tua) tidak boleh
-            // membunuh pill order BARU (bukti: Feedback ...778 vs kitchen ...643).
+            // Grace dua arah: stage boleh sedikit lebih baru dari feedback (burst order
+            // sama). Feedback basi kemarin tetap gugur (stage >> feedback + grace).
             if (type == NotificationType.DELIVERY) {
+                val pendingFin = pendingDeliveryFinished[sbn.packageName]
                 val finishedSibling = try {
                     activeNotifications?.filter { other ->
                         other.packageName == sbn.packageName && other.key != key &&
                             com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(sbnCorpus(other))
                     }?.maxByOrNull { it.postTime }
                 } catch (_: Exception) { null }
-                if (finishedSibling != null && finishedSibling.postTime >= sbn.postTime) {
-                    dismissDeliveryPills(sbn.packageName, finishedSibling.postTime)
+                val finTime = maxOf(
+                    finishedSibling?.postTime ?: 0L,
+                    pendingFin ?: 0L
+                )
+                if (finTime > 0L && sbn.postTime <= finTime + FINISH_POST_GRACE_MS) {
+                    dismissDeliveryPills(sbn.packageName, finTime)
                     try {
                         ShizukuManager.cancel(this@NotificationReaderService, sbn.key.hashCode())
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                     } catch (_: Exception) {}
                     cleanupCache(key)
-                    Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key by=${finishedSibling.key}")
+                    Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key finTime=$finTime postTime=${sbn.postTime}")
                     return
                 }
             }
@@ -2033,14 +2049,24 @@ class NotificationReaderService : NotificationListenerService() {
 
     private var syncJob: Job? = null
 
-    override fun onListenerConnected() { 
+    override fun onListenerConnected() {
         Log.i(TAG, "HyperBridge Service Connected")
         syncNotifications(refresh = true)
+        // Periodic: urutan sync bisa proses Feedback sebelum stage; tanpa tick,
+        // pill "is here" yang posting belakangan tak pernah dicek lagi sampai screen-on.
+        syncJob?.cancel()
+        syncJob = serviceScope.launch {
+            while (true) {
+                delay(45_000L)
+                try { syncNotifications(refresh = false) } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun syncNotifications(refresh: Boolean = false, retryCount: Int = 0) {
         val now = System.currentTimeMillis()
         recentlyRemovedKeys.entries.removeIf { now - it.value > 10000 }
+        prunePendingDeliveryFinished(now)
 
         serviceScope.launch(Dispatchers.IO) {
             try {
