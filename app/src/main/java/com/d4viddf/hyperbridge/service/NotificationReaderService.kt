@@ -591,14 +591,47 @@ class NotificationReaderService : NotificationListenerService() {
                     (deliveryContentTime[it.key] ?: 0L) <= maxPostTime + FINISH_POST_GRACE_MS)
         }
         for ((staleKey, island) in stale) {
-            try {
-                ShizukuManager.cancel(this, island.id)
-                NotificationManagerCompat.from(this).cancel(island.id)
-            } catch (_: Exception) {}
+            cancelBridgeId(island.id)
             noteDismissed(island.packageName, island.lastContentHash)
             cleanupCache(staleKey)
         }
+        // Orphan bridge notif (proses lama / reverseTranslations kosong): cancel id
+        // yang menempel ke paket ini via EXTRA_ORIGINAL_KEY — activeIslands alone miss.
+        cancelOrphanBridgeNotificationsForPackage(pkg, maxPostTime)
         if (stale.isNotEmpty()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+    }
+
+    /** Compat cancel SELALU jalan walau Shizuku gagal/throw (orphan tak boleh lolos). */
+    private fun cancelBridgeId(id: Int) {
+        try { ShizukuManager.cancel(this, id) } catch (_: Exception) {}
+        try { NotificationManagerCompat.from(this).cancel(id) } catch (_: Exception) {}
+    }
+
+    /**
+     * Scan notif bridge milik app ini yang EXTRA_ORIGINAL_KEY-nya menunjuk ke [pkg]
+     * (atau key delivery package) — tutup slot setelah sinyal tuntas walau
+     * activeIslands/reverseTranslations sudah kosong (restart / FINISHED duluan).
+     */
+    private fun cancelOrphanBridgeNotificationsForPackage(pkg: String, maxPostTime: Long? = null) {
+        try {
+            val list = activeNotifications ?: return
+            for (n in list) {
+                if (n.packageName != packageName) continue
+                val id = n.id
+                if (id == PermanentIslandManager.PERMANENT_BRIDGE_ID) continue
+                if (id >= WIDGET_ID_BASE) continue
+                if (id in (WATCH_RELAY_ID_BASE - 0x0F)..WATCH_RELAY_ID_BASE) continue
+                if ((n.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) continue
+                val origKey = n.notification.extras.getString(EXTRA_ORIGINAL_KEY) ?: continue
+                if (!origKey.contains(pkg)) continue
+                // Grace sama dgn victims: pill order BARU (postTime bridge baru) jangan
+                // ikut kebunuh feedback basi. Orphan lama postTime tua = lolos cancel.
+                if (maxPostTime != null && n.postTime > maxPostTime + FINISH_POST_GRACE_MS) continue
+                Log.w(TAG, "DELIVERY-ORPHAN-CANCEL id=$id origKey=$origKey pkg=$pkg postTime=${n.postTime} maxPostTime=$maxPostTime")
+                cancelBridgeId(id)
+                reverseTranslations.remove(id)
+            }
+        } catch (_: Exception) {}
     }
 
     /** Catat konten yang di-dismiss agar repost identik yang lebih tua gugur. */
@@ -1092,13 +1125,13 @@ class NotificationReaderService : NotificationListenerService() {
                     contentTime <= sbn.postTime + FINISH_POST_GRACE_MS
                 }
                 for ((victimKey, island) in victims) {
-                    try {
-                        ShizukuManager.cancel(this@NotificationReaderService, island.id)
-                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
-                    } catch (_: Exception) {}
+                    cancelBridgeId(island.id)
                     noteDismissed(island.packageName, island.lastContentHash)
                     cleanupCache(victimKey)
                 }
+                // Tutup juga orphan bridge (activeIslands kosong saat Feedback duluan /
+                // restart) — tanpa ini pill "is here" lama nempel selamanya.
+                cancelOrphanBridgeNotificationsForPackage(sbn.packageName, sbn.postTime)
                 if (victims.isNotEmpty()) Log.w(TAG, "DELIVERY-FINISHED-OTHER dismiss ${victims.size} pill(s) pkg=${sbn.packageName} key=$key")
             }
             // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
@@ -1120,10 +1153,9 @@ class NotificationReaderService : NotificationListenerService() {
                 )
                 if (finTime > 0L && sbn.postTime <= finTime + FINISH_POST_GRACE_MS) {
                     dismissDeliveryPills(sbn.packageName, finTime)
-                    try {
-                        ShizukuManager.cancel(this@NotificationReaderService, sbn.key.hashCode())
-                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
-                    } catch (_: Exception) {}
+                    cancelBridgeId(sbn.key.hashCode())
+                    // Juga bunuh bridge id yatim yang menempel key stage ini
+                    cancelOrphanBridgeNotificationsForPackage(sbn.packageName, finTime)
                     cleanupCache(key)
                     Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key finTime=$finTime postTime=${sbn.postTime}")
                     return
@@ -2179,11 +2211,8 @@ class NotificationReaderService : NotificationListenerService() {
                     if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) continue
                     if (trackedBridgeIds.contains(id)) continue
                     if (System.currentTimeMillis() - sbn.postTime < 5000) continue
-                    if (debugLogEnabled()) Log.d(TAG, "Sync: Reaping orphan bridge notification $id")
-                    try {
-                        ShizukuManager.cancel(this@NotificationReaderService, id)
-                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(id)
-                    } catch (_: Exception) {}
+                    Log.w(TAG, "Sync: Reaping orphan bridge notification $id")
+                    cancelBridgeId(id)
                     reverseTranslations.remove(id)
                 }
 
@@ -2201,11 +2230,8 @@ class NotificationReaderService : NotificationListenerService() {
                             deliveryContentTime[it.key] ?: it.value.postTime
                         }
                         for (dupe in sorted.drop(1)) {
-                            if (debugLogEnabled()) Log.w(TAG, "Sync: Double-pill sweep cancel ${dupe.value.id} keep ${sorted.first().value.id}")
-                            try {
-                                ShizukuManager.cancel(this@NotificationReaderService, dupe.value.id)
-                                NotificationManagerCompat.from(this@NotificationReaderService).cancel(dupe.value.id)
-                            } catch (_: Exception) {}
+                            Log.w(TAG, "Sync: Double-pill sweep cancel ${dupe.value.id} keep ${sorted.first().value.id}")
+                            cancelBridgeId(dupe.value.id)
                             cleanupCache(dupe.key)
                         }
                     }
