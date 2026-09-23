@@ -62,6 +62,8 @@ class NotificationReaderService : NotificationListenerService() {
     companion object {
         const val ACTION_RELOAD_THEME = "com.d4viddf.hyperbridge.ACTION_RELOAD_THEME"
         const val ACTION_PERFORM_MIGRATION = "com.d4viddf.hyperbridge.ACTION_PERFORM_MIGRATION"
+        /** Toleransi postTime sinyal tuntas vs update pill terakhir (burst order sama). */
+        const val FINISH_POST_GRACE_MS = 60 * 60_000L
     }
 
     private val TAG = "HyperBridgeDebug"
@@ -547,18 +549,42 @@ class NotificationReaderService : NotificationListenerService() {
         updatePermanentIsland()
     }
 
+    /** Ada RemoteViews di notif (korpus bisa beda walau extras/contentHash sama). */
+    private fun hasRemoteViews(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification
+        return n.extras.getBoolean("android.contains.customView", false) ||
+            n.contentView != null || n.bigContentView != null || n.headsUpContentView != null
+    }
+
+    /**
+     * True bila konten DELIVERY identik. contentHash saja tidak cukup: live-activity
+     * Grab punya extras selalu null (hash sama) dan isi pindah lewat RV — bila
+     * fingerprint gagal (0) kita anggap BEDA supaya async-RV tetap jalan.
+     */
+    private fun deliveryContentUnchanged(previous: ActiveIsland, newContentHash: Int, sbn: StatusBarNotification): Boolean {
+        if (previous.lastContentHash != newContentHash) return false
+        val rv = rvFingerprint(sbn)
+        if (rv != 0) return rv == previous.rvHash
+        // fingerprint tak terbaca: tanpa RV hash sudah cukup; dengan RV jangan dedup
+        return !hasRemoteViews(sbn)
+    }
+
     /**
      * Bunuh pill DELIVERY milik satu paket (order tuntas / ganti key).
-     * [maxPostTime] terisi = hanya pill dengan deliveryContentTime <= sinyal tuntas —
-     * feedback basi tidak boleh membunuh pill order BARU yang lebih segar.
+     * [maxPostTime] terisi = hanya pill yang dianggap order sama / lebih tua dari
+     * sinyal tuntas — feedback basi kemarin tidak boleh bunuh order BARU.
+     * Grace 60 mnt: burst stage+feedback dalam order yang sama boleh punya postTime
+     * tidak berurutan (update pill sering LEBIH BARU dari notif feedback).
      */
     private fun dismissDeliveryPills(pkg: String, maxPostTime: Long? = null) {
         val stale = activeIslands.entries.filter {
             it.value.type == NotificationType.DELIVERY && it.value.packageName == pkg &&
-                (maxPostTime == null || (deliveryContentTime[it.key] ?: 0L) <= maxPostTime)
+                (maxPostTime == null ||
+                    (deliveryContentTime[it.key] ?: 0L) <= maxPostTime + FINISH_POST_GRACE_MS)
         }
         for ((staleKey, island) in stale) {
             try {
+                ShizukuManager.cancel(this, island.id)
                 NotificationManagerCompat.from(this).cancel(island.id)
             } catch (_: Exception) {}
             noteDismissed(island.packageName, island.lastContentHash)
@@ -980,7 +1006,7 @@ class NotificationReaderService : NotificationListenerService() {
                 } catch (_: Exception) { 0 }
                 if (deliveryFastHash != 0 && previous != null && previous.type == NotificationType.DELIVERY &&
                     previous.fastHash == deliveryFastHash &&
-                    rvFingerprint(sbn) == previous.rvHash
+                    deliveryContentUnchanged(previous, previous.lastContentHash, sbn)
                 ) return
             }
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
@@ -1034,6 +1060,7 @@ class NotificationReaderService : NotificationListenerService() {
                 // Update same-key yang berubah jadi SELESAI tapi pill-nya belum ke-track
                 // (bridgeId deterministik dari key): pastikan ikut dicancel.
                 try {
+                    ShizukuManager.cancel(this@NotificationReaderService, sbn.key.hashCode())
                     NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                 } catch (_: Exception) {}
                 cleanupCache(key)
@@ -1047,11 +1074,15 @@ class NotificationReaderService : NotificationListenerService() {
                 com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
             ) {
                 val victims = activeIslands.entries.filter {
-                    it.value.type == NotificationType.DELIVERY && it.value.packageName == sbn.packageName &&
-                        (deliveryContentTime[it.key] ?: 0L) <= sbn.postTime
+                    if (it.value.type != NotificationType.DELIVERY || it.value.packageName != sbn.packageName) return@filter false
+                    val contentTime = deliveryContentTime[it.key] ?: 0L
+                    // Burst order sama: update pill (stage) sering lebih baru dari feedback
+                    // — grace 60 mnt. Feedback basi (kemarin) tetap gugur filter.
+                    contentTime <= sbn.postTime + FINISH_POST_GRACE_MS
                 }
                 for ((victimKey, island) in victims) {
                     try {
+                        ShizukuManager.cancel(this@NotificationReaderService, island.id)
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
                     } catch (_: Exception) {}
                     noteDismissed(island.packageName, island.lastContentHash)
@@ -1074,6 +1105,7 @@ class NotificationReaderService : NotificationListenerService() {
                 if (finishedSibling != null && finishedSibling.postTime >= sbn.postTime) {
                     dismissDeliveryPills(sbn.packageName, finishedSibling.postTime)
                     try {
+                        ShizukuManager.cancel(this@NotificationReaderService, sbn.key.hashCode())
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                     } catch (_: Exception) {}
                     cleanupCache(key)
@@ -1121,6 +1153,7 @@ class NotificationReaderService : NotificationListenerService() {
                     // drop(1): yang termuda dipertahankan sebagai target collapse.
                     for ((staleKey, island) in staleSames.drop(1)) {
                         try {
+                            ShizukuManager.cancel(this@NotificationReaderService, island.id)
                             NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
                         } catch (_: Exception) {}
                         cleanupCache(staleKey)
@@ -1140,6 +1173,7 @@ class NotificationReaderService : NotificationListenerService() {
                 }
                 for ((dupeKey, island) in dupes) {
                     try {
+                        ShizukuManager.cancel(this@NotificationReaderService, island.id)
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
                     } catch (_: Exception) {}
                     cleanupCache(dupeKey)
@@ -1186,7 +1220,10 @@ class NotificationReaderService : NotificationListenerService() {
                         removalJobs.remove(oldKey)
                         // Hapus notif bridge lama BILA id berubah (jangan tumpuk dua pill).
                         if (existingEntry.value.id != bridgeId) {
-                            try { NotificationManagerCompat.from(this).cancel(existingEntry.value.id) } catch (_: Exception) {}
+                            try {
+                                ShizukuManager.cancel(this, existingEntry.value.id)
+                                NotificationManagerCompat.from(this).cancel(existingEntry.value.id)
+                            } catch (_: Exception) {}
                         }
 
                         effectiveKey = oldKey
@@ -1318,7 +1355,7 @@ class NotificationReaderService : NotificationListenerService() {
                         isIndeterminate.hashCode() + actionState.hashCode()
 
                 if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
-                    (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
+                    (type != NotificationType.DELIVERY || deliveryContentUnchanged(previous, newContentHash, sbn))
                 ) {
                     Log.d(TAG, "DEDUP-SAME skip pkg=${sbn.packageName} key=$key type=$type")
                     return
@@ -1372,7 +1409,7 @@ class NotificationReaderService : NotificationListenerService() {
             // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
             val newContentHash = data.jsonParam.hashCode()
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
-                (type != NotificationType.DELIVERY || rvFingerprint(sbn) == previous.rvHash)
+                (type != NotificationType.DELIVERY || deliveryContentUnchanged(previous, newContentHash, sbn))
             ) {
                 Log.d(TAG, "DEDUP-SAME skip pkg=${sbn.packageName} key=$key type=$type")
                 return
@@ -2104,6 +2141,9 @@ class NotificationReaderService : NotificationListenerService() {
 
                 // Bridged notifications we no longer track (e.g. left over from a service restart)
                 // keep their island slot occupied forever, since island-swipe never removes them.
+                // Juga tangkap dobel order yang sempat ke-post dengan id berbeda lalu di-orphan-kan
+                // (receipt stage isi ulang bridgeId lama yang sudah di-cancel).
+                val trackedBridgeIds = reverseTranslations.keys.toSet()
                 for (sbn in currentNotifications) {
                     if (sbn.packageName != packageName) continue
                     val id = sbn.id
@@ -2111,13 +2151,39 @@ class NotificationReaderService : NotificationListenerService() {
                     if (id >= WIDGET_ID_BASE) continue
                     if (id in (WATCH_RELAY_ID_BASE - 0x0F)..WATCH_RELAY_ID_BASE) continue
                     if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) continue
-                    if (reverseTranslations.containsKey(id)) continue
+                    if (trackedBridgeIds.contains(id)) continue
                     if (System.currentTimeMillis() - sbn.postTime < 5000) continue
                     if (debugLogEnabled()) Log.d(TAG, "Sync: Reaping orphan bridge notification $id")
                     try {
+                        ShizukuManager.cancel(this@NotificationReaderService, id)
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(id)
                     } catch (_: Exception) {}
+                    reverseTranslations.remove(id)
                 }
+
+                // Sweep: >1 pill DELIVERY ter-track utk paket yang sama (gagal collapse
+                // karena cancel NotificationManagerCompat sempat miss). Sisakan termuda,
+                // bunuh sisanya. Hanya sentuh island DELIVERY — multi-island sah
+                // (message/timer/dst) jangan disentuh.
+                try {
+                    val byPkg = activeIslands.entries
+                        .filter { it.value.type == NotificationType.DELIVERY }
+                        .groupBy { it.value.packageName }
+                    for ((_, islands) in byPkg) {
+                        if (islands.size <= 1) continue
+                        val sorted = islands.sortedByDescending {
+                            deliveryContentTime[it.key] ?: it.value.postTime
+                        }
+                        for (dupe in sorted.drop(1)) {
+                            if (debugLogEnabled()) Log.w(TAG, "Sync: Double-pill sweep cancel ${dupe.value.id} keep ${sorted.first().value.id}")
+                            try {
+                                ShizukuManager.cancel(this@NotificationReaderService, dupe.value.id)
+                                NotificationManagerCompat.from(this@NotificationReaderService).cancel(dupe.value.id)
+                            } catch (_: Exception) {}
+                            cleanupCache(dupe.key)
+                        }
+                    }
+                } catch (_: Exception) {}
 
                 val islandPresent = currentNotifications.any {
                     it.packageName == packageName && it.id == PermanentIslandManager.PERMANENT_BRIDGE_ID
