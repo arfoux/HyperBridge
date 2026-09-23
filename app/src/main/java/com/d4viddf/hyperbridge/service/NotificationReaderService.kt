@@ -547,10 +547,15 @@ class NotificationReaderService : NotificationListenerService() {
         updatePermanentIsland()
     }
 
-    /** Bunuh semua pill DELIVERY milik satu paket (order tuntas / ganti key). */
-    private fun dismissDeliveryPills(pkg: String) {
+    /**
+     * Bunuh pill DELIVERY milik satu paket (order tuntas / ganti key).
+     * [maxPostTime] terisi = hanya pill dengan deliveryContentTime <= sinyal tuntas —
+     * feedback basi tidak boleh membunuh pill order BARU yang lebih segar.
+     */
+    private fun dismissDeliveryPills(pkg: String, maxPostTime: Long? = null) {
         val stale = activeIslands.entries.filter {
-            it.value.type == NotificationType.DELIVERY && it.value.packageName == pkg
+            it.value.type == NotificationType.DELIVERY && it.value.packageName == pkg &&
+                (maxPostTime == null || (deliveryContentTime[it.key] ?: 0L) <= maxPostTime)
         }
         for ((staleKey, island) in stale) {
             try {
@@ -1025,7 +1030,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (type == NotificationType.DELIVERY &&
                 com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(deliveryCorpus)
             ) {
-                dismissDeliveryPills(sbn.packageName)
+                dismissDeliveryPills(sbn.packageName, sbn.postTime)
                 // Update same-key yang berubah jadi SELESAI tapi pill-nya belum ke-track
                 // (bridgeId deterministik dari key): pastikan ikut dicancel.
                 try {
@@ -1067,7 +1072,7 @@ class NotificationReaderService : NotificationListenerService() {
                     }?.maxByOrNull { it.postTime }
                 } catch (_: Exception) { null }
                 if (finishedSibling != null && finishedSibling.postTime >= sbn.postTime) {
-                    dismissDeliveryPills(sbn.packageName)
+                    dismissDeliveryPills(sbn.packageName, finishedSibling.postTime)
                     try {
                         NotificationManagerCompat.from(this@NotificationReaderService).cancel(sbn.key.hashCode())
                     } catch (_: Exception) {}
