@@ -341,16 +341,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
                 picEndKey = "hidden_pixel"
             )
         }
-        // 7. Belah 2 per aplikasi (spek final): kiri = logo + JUDUL PENUH +
-        //    baris 2 kosong; kanan = ETA 1 baris TANPA pic; ring = progres +
-        //    warna tema (oranye Shopee, hijau Grab).
         // eta dari extractEtaFromCorpus selalu format "N menit" -> padatkan jadi "Nmnt".
         // Kosong = pinjam ETA terakhir order yang sama (shownEta).
         val etaShort = shownEta.replace(" menit", "mnt")
         val islandPct = progressPercent ?: percent.takeIf { hasProgress } ?: ((stage ?: 0) * 100 / 3)
-        val bigTitle = if (isGrab) cachedResto ?: title else title
-        // Kiri = logo motor per aplikasi + judul penuh, baris 2 kosong.
-        // Kanan = ETA 1 baris tanpa pic. Ring nempel di kiri.
         val leftPicKey = if (isGrab) "delivery_mini_bike" else "delivery_mini_motor"
         if (isGrab) {
             builder.addPicture(grabBikePicture("delivery_mini_bike"))
@@ -364,7 +358,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
             left = ImageTextInfoLeft(
                 type = 1,
                 picInfo = PicInfo(type = 1, pic = leftPicKey),
-                textInfo = TextInfo(bigTitle, "")
+                textInfo = TextInfo("", "")
             ),
             right = ImageTextInfoRight(
                 type = 2,
