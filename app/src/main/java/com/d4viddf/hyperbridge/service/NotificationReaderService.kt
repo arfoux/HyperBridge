@@ -97,6 +97,20 @@ internal fun deliveryOrderMatches(signalIdentity: String?, activeIdentity: Strin
     return signalIdentity == activeIdentity
 }
 
+/**
+ * Stage beku yang belum pernah kita track = sisa order yang sudah selesai.
+ *
+ * MIUI sering mematikan proses service; registry `finishedOrders` ikut hilang,
+ * dan stage yang masih nempel di daftar notif (Grab tidak pernah mencabut
+ * notif stage-nya) akan membangun ulang pill order lama tiap kali proses
+ * start. Yang sudah kita track justru tidak boleh kena gate ini: pill itulah
+ * yang membuat live update order berjalan terus.
+ */
+internal fun isUntrackedStaleStage(tracked: Boolean, postTime: Long, now: Long): Boolean =
+    !tracked && now - postTime > DELIVERY_UNTRACKED_STALE_MS
+
+private const val DELIVERY_UNTRACKED_STALE_MS = 45 * 60_000L
+
 class NotificationReaderService : NotificationListenerService() {
 
     companion object {
@@ -1319,6 +1333,17 @@ class NotificationReaderService : NotificationListenerService() {
                     cancelOrphanBridgeNotificationsForPackage(sbn.packageName, finTime, finIdentity)
                     cleanupCache(key)
                     Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key finTime=$finTime postTime=${sbn.postTime} order=$finIdentity")
+                    return
+                }
+            }
+            // Backlog flush setelah proses baru start: stage basi dari order lama
+            // tidak boleh membangun pill. Sinyal tuntasnya masih ada, tapi
+            // registry in-memory sudah kosong, jadi umur stage satu-satunya bukti.
+            if (type == NotificationType.DELIVERY) {
+                val trackedStage = deliveryContentTime.containsKey(key) || activeIslands.containsKey(key)
+                if (isUntrackedStaleStage(trackedStage, sbn.postTime, System.currentTimeMillis())) {
+                    cancelBridgeId(sbn.key.hashCode())
+                    Log.w(TAG, "DELIVERY-UNTRACKED-STALE skip key=$key pkg=${sbn.packageName} postTime=${sbn.postTime}")
                     return
                 }
             }
