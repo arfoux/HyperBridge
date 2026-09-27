@@ -167,7 +167,7 @@ class NotificationReaderService : NotificationListenerService() {
     // setelah app thaw) tidak boleh menghidupkan pill yang baru saja ditutup.
     // Kunci "pkg|identity"; nilai = postTime sinyal tuntas.
     private val finishedOrders = ConcurrentHashMap<String, Long>()
-    private val FINISHED_ORDER_TTL_MS = 30 * 60_000L
+    private val FINISHED_ORDER_TTL_MS = 10 * 60_000L
     private lateinit var permanentIslandManager: PermanentIslandManager
     private val intentionallyRemovedKeys = ConcurrentHashMap.newKeySet<String>()
     private val widgetUpdateDebouncer = ConcurrentHashMap<Int, Long>()
@@ -768,16 +768,31 @@ class NotificationReaderService : NotificationListenerService() {
 
     /**
      * Sinyal tuntas bisa tiba saat post ini masih jalan (dua callback listener
-     * diproses paralel). Bridge yang baru di-post untuk order yang sudah
-     * tertutup harus langsung dibalik, kalau tidak pill-nya nempel lagi.
+     * diproses paralel). Bridge yang baru di-post untuk stage basi harus langsung
+     * dibalik, kalau tidak pill-nya nempel lagi.
+     *
+     * True = bridge sudah dibalik; pemanggil harus berhenti supaya tidak
+     * menjadwalkan timeout/ETA untuk key yang sudah wafat.
      */
-    private fun cancelPostAfterFinish(pkg: String, identity: String?, bridgeId: Int, trackedKey: String) {
-        if (identity == null) return
-        val finishedAt = finishedOrders["$pkg|$identity"] ?: return
-        Log.w(TAG, "DELIVERY-FINISHED-RACE cancel id=$bridgeId pkg=$pkg key=$trackedKey finishedAt=$finishedAt")
+    private fun cancelPostAfterFinish(
+        pkg: String,
+        identity: String?,
+        postTime: Long,
+        bridgeId: Int,
+        trackedKey: String
+    ): Boolean {
+        // Order baru dari resto yang sama punya identity sama -> yang menentukan
+        // cuma umur stage, bukan isi registry.
+        if (!isStageAfterFinish(pkg, identity, postTime)) return false
+        // Stage yang lebih baru sudah menimpa key ini: jangan bunuh pill-nya.
+        val tracked = deliveryContentTime[trackedKey]
+        if (tracked != null && tracked != postTime) return false
+        val finishedAt = finishedOrders["$pkg|$identity"]
+        Log.w(TAG, "DELIVERY-FINISHED-RACE cancel id=$bridgeId pkg=$pkg key=$trackedKey postTime=$postTime finishedAt=$finishedAt")
         cancelBridgeId(bridgeId)
         reverseTranslations.remove(bridgeId)
         cleanupCache(trackedKey)
+        return true
     }
 
     // Pengecekan tuntas berjangkar ETA order itu sendiri (bukan angka tetap):
@@ -1610,7 +1625,7 @@ class NotificationReaderService : NotificationListenerService() {
                     deliveryContentTime[effectiveKey] = sbn.postTime
                     deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
                     pendingDeliveryFinished.remove(sbn.packageName)
-                    cancelPostAfterFinish(sbn.packageName, deliveryIdentity, bridgeId, effectiveKey)
+                    if (cancelPostAfterFinish(sbn.packageName, deliveryIdentity, sbn.postTime, bridgeId, effectiveKey)) return
                 }
                 updatePermanentIsland()
 
@@ -1692,7 +1707,7 @@ class NotificationReaderService : NotificationListenerService() {
                 deliveryContentTime[effectiveKey] = sbn.postTime
                 deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
                 pendingDeliveryFinished.remove(sbn.packageName)
-                cancelPostAfterFinish(sbn.packageName, deliveryIdentity, bridgeId, effectiveKey)
+                if (cancelPostAfterFinish(sbn.packageName, deliveryIdentity, sbn.postTime, bridgeId, effectiveKey)) return
             }
             // Cek-tuntas berjangkar ETA (tanpa ETA = fallback 45 mnt). Dijadwal ulang
             // bila async RV menemukan ETA asli. Custom path saja (native punya timeout sendiri).
