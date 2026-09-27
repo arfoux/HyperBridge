@@ -101,15 +101,27 @@ internal fun deliveryOrderMatches(signalIdentity: String?, activeIdentity: Strin
  * Stage beku yang belum pernah kita track = sisa order yang sudah selesai.
  *
  * MIUI sering mematikan proses service; registry `finishedOrders` ikut hilang,
- * dan stage yang masih nempel di daftar notif (Grab tidak pernah mencabut
- * notif stage-nya) akan membangun ulang pill order lama tiap kali proses
- * start. Yang sudah kita track justru tidak boleh kena gate ini: pill itulah
- * yang membuat live update order berjalan terus.
+ * dan stage yang masih nempel di daftar notif (Grab tidak pernah mencabut notif
+ * stage-nya) akan membangun ulang pill order lama tiap kali proses start.
+ *
+ * Yang sudah kita track tidak boleh kena gate: pill itulah yang membuat live
+ * update order berjalan terus. Stage beku juga hanya boleh gugur kalau tidak
+ * ada stage DELIVERY lain di paket itu yang masih hidup — Grab membekukan
+ * postTime stage (isi tetap di-update, postTime tidak), jadi umur stage
+ * sendirinya tidak bisa membedakan "order lama" dari "order panjang".
  */
-internal fun isUntrackedStaleStage(tracked: Boolean, postTime: Long, now: Long): Boolean =
-    !tracked && now - postTime > DELIVERY_UNTRACKED_STALE_MS
+internal fun isUntrackedStaleStage(
+    tracked: Boolean,
+    postTime: Long,
+    now: Long,
+    freshestPackageStage: Long
+): Boolean {
+    if (tracked) return false
+    if (now - postTime <= DELIVERY_UNTRACKED_STALE_MS) return false
+    return now - freshestPackageStage > DELIVERY_UNTRACKED_STALE_MS
+}
 
-private const val DELIVERY_UNTRACKED_STALE_MS = 45 * 60_000L
+private const val DELIVERY_UNTRACKED_STALE_MS = 30 * 60_000L
 
 class NotificationReaderService : NotificationListenerService() {
 
@@ -168,6 +180,10 @@ class NotificationReaderService : NotificationListenerService() {
     private val deliveryEtaJobs = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
     private val removalJobs = ConcurrentHashMap<String, Job>()
+    // Stage DELIVERY termuda per paket (hasil scan sync, ditukar utuh). Bukti
+    // masih ada order hidup di paket ini; dipakai gate beku.
+    @Volatile
+    private var freshestDeliveryStage: Map<String, Long> = emptyMap()
     // Pill yang di-dismiss (swipe user / TTL / ETA / tuntas): konten IDENTIK tidak
     // boleh muncul lagi bila notifnya lahir sebelum/saat dismiss (repost sync /
     // update Grab yang sama). Order BARU (postTime lebih baru, walau teksnya sama
@@ -1337,13 +1353,15 @@ class NotificationReaderService : NotificationListenerService() {
                 }
             }
             // Backlog flush setelah proses baru start: stage basi dari order lama
-            // tidak boleh membangun pill. Sinyal tuntasnya masih ada, tapi
-            // registry in-memory sudah kosong, jadi umur stage satu-satunya bukti.
+            // tidak boleh membangun pill. Sinyal tuntasnya masih ada tapi registry
+            // in-memory sudah kosong, jadi yang tersisa cuma umur stage + stage lain
+            // yang masih hidup di paket yang sama.
             if (type == NotificationType.DELIVERY) {
                 val trackedStage = deliveryContentTime.containsKey(key) || activeIslands.containsKey(key)
-                if (isUntrackedStaleStage(trackedStage, sbn.postTime, System.currentTimeMillis())) {
+                val freshest = freshestDeliveryStage[sbn.packageName] ?: 0L
+                if (isUntrackedStaleStage(trackedStage, sbn.postTime, System.currentTimeMillis(), freshest)) {
                     cancelBridgeId(sbn.key.hashCode())
-                    Log.w(TAG, "DELIVERY-UNTRACKED-STALE skip key=$key pkg=${sbn.packageName} postTime=${sbn.postTime}")
+                    Log.w(TAG, "DELIVERY-UNTRACKED-STALE skip key=$key pkg=${sbn.packageName} postTime=${sbn.postTime} freshest=$freshest")
                     return
                 }
             }
@@ -2394,6 +2412,22 @@ class NotificationReaderService : NotificationListenerService() {
                     }
                     return@launch
                 }
+                // Stage DELIVERY termuda per paket sebelum loop di bawah memproses
+                // notif: gate beku butuh tahu apakah paket ini masih punya order hidup.
+                val freshestStage = HashMap<String, Long>()
+                for (sbn in currentNotifications) {
+                    if (sbn.packageName == packageName) continue
+                    // Gagal baca = anggap masih hidup (pill hilang jauh lebih divisive
+                    // daripada pill nyasar).
+                    val isDeliverySignal = runCatching {
+                        (sbn.packageName == "com.shopee.id" && sbn.notification.extras.containsKey("extra_live_activity_id")) ||
+                            isGrabDeliveryCandidate(sbn)
+                    }.getOrDefault(true)
+                    if (!isDeliverySignal) continue
+                    if (sbn.postTime > (freshestStage[sbn.packageName] ?: 0L)) freshestStage[sbn.packageName] = sbn.postTime
+                }
+                freshestDeliveryStage = freshestStage
+
                 val systemNotificationKeys = currentNotifications.map { it.key }.toSet()
 
                 var nativeChanged = false

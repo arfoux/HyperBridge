@@ -31,12 +31,15 @@ class DeliveryOrderMatchTest {
     @Test
     fun frozenUntrackedStageCannotRebuildAPill() {
         val now = 1_800_000_000_000L
-        // Stage beku 1,5 jam (order lama) -> jangan bangun pill saat proses start.
-        assertTrue(isUntrackedStaleStage(tracked = false, postTime = now - 90 * 60_000L, now = now))
-        // Batas ambang: 44 menit masih lolos, 46 menit sudah gugur.
-        assertFalse(isUntrackedStaleStage(tracked = false, postTime = now - 44 * 60_000L, now = now))
-        assertTrue(isUntrackedStaleStage(tracked = false, postTime = now - 46 * 60_000L, now = now))
+        // Semua stage paket ini beku > 30 mnt (order lama) -> jangan bangun pill.
+        assertTrue(isUntrackedStaleStage(false, now - 90 * 60_000L, now, freshestPackageStage = 0L))
+        assertTrue(isUntrackedStaleStage(false, now - 90 * 60_000L, now, freshestPackageStage = now - 60 * 60_000L))
+        // Ada stage DELIVERY lain di paket yang masih hidup -> order ini belum
+        // tentu selesai, stage beku tetap boleh rebuild pill-nya.
+        assertFalse(isUntrackedStaleStage(false, now - 90 * 60_000L, now, freshestPackageStage = now - 2 * 60_000L))
         // Order yang sedang jalan (pill-nya hidup) tidak boleh ikut digate.
-        assertFalse(isUntrackedStaleStage(tracked = true, postTime = now - 90 * 60_000L, now = now))
+        assertFalse(isUntrackedStaleStage(true, now - 90 * 60_000L, now, freshestPackageStage = 0L))
+        // Stage baru tetap lolos walau stage lain di paket beku.
+        assertFalse(isUntrackedStaleStage(false, now - 2 * 60_000L, now, freshestPackageStage = 0L))
     }
 }
