@@ -163,6 +163,11 @@ class NotificationReaderService : NotificationListenerService() {
     // Grace buat cancel+repost key-baru-konten-sama (Grab burst update<key> ganti
     // tiap post): 3 mnt setelah swipe, konten identik tetap gugur walau postTime baru.
     private val DISMISS_GRACE_MS = 3 * 60_000L
+    // Order yang sudah tuntas: stage yang telat (antrean listener, backlog flush
+    // setelah app thaw) tidak boleh menghidupkan pill yang baru saja ditutup.
+    // Kunci "pkg|identity"; nilai = postTime sinyal tuntas.
+    private val finishedOrders = ConcurrentHashMap<String, Long>()
+    private val FINISHED_ORDER_TTL_MS = 30 * 60_000L
     private lateinit var permanentIslandManager: PermanentIslandManager
     private val intentionallyRemovedKeys = ConcurrentHashMap.newKeySet<String>()
     private val widgetUpdateDebouncer = ConcurrentHashMap<Int, Long>()
@@ -741,6 +746,40 @@ class NotificationReaderService : NotificationListenerService() {
         return postTime <= time + 60_000L || now - time < DISMISS_GRACE_MS
     }
 
+    /** Catat order yang sudah tuntas; pemicunya sinyal rating/feedback/chat akhir. */
+    private fun noteOrderFinished(pkg: String, identity: String?, at: Long) {
+        if (identity == null) return
+        val now = System.currentTimeMillis()
+        finishedOrders.entries.removeIf { now - it.value > FINISHED_ORDER_TTL_MS }
+        val key = "$pkg|$identity"
+        finishedOrders[key] = maxOf(finishedOrders[key] ?: Long.MIN_VALUE, at)
+    }
+
+    /**
+     * Stage yang postTime-nya sudah kalah dari sinyal tuntas = stage basi.
+     * Identity null tidak bisa dipastikan -> biarkan lolos (hanya order dengan
+     * identity sama yang ditutup).
+     */
+    private fun isStageAfterFinish(pkg: String, identity: String?, postTime: Long): Boolean {
+        if (identity == null) return false
+        val finishedAt = finishedOrders["$pkg|$identity"] ?: return false
+        return postTime <= finishedAt + FINISH_SAME_ORDER_GRACE_MS
+    }
+
+    /**
+     * Sinyal tuntas bisa tiba saat post ini masih jalan (dua callback listener
+     * diproses paralel). Bridge yang baru di-post untuk order yang sudah
+     * tertutup harus langsung dibalik, kalau tidak pill-nya nempel lagi.
+     */
+    private fun cancelPostAfterFinish(pkg: String, identity: String?, bridgeId: Int, trackedKey: String) {
+        if (identity == null) return
+        val finishedAt = finishedOrders["$pkg|$identity"] ?: return
+        Log.w(TAG, "DELIVERY-FINISHED-RACE cancel id=$bridgeId pkg=$pkg key=$trackedKey finishedAt=$finishedAt")
+        cancelBridgeId(bridgeId)
+        reverseTranslations.remove(bridgeId)
+        cleanupCache(trackedKey)
+    }
+
     // Pengecekan tuntas berjangkar ETA order itu sendiri (bukan angka tetap):
     // sekali saat ETA tiba, lalu per 10 menit (maks ~6 jam), lalu berhenti diam-diam.
     // Murah: 1 timer per order + 1 baca daftar notif per cek (tanpa inflate/polling app).
@@ -1191,6 +1230,7 @@ class NotificationReaderService : NotificationListenerService() {
                 com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(deliveryCorpus)
             ) {
                 // Sinyal tuntas hanya menutup source yang tidak lebih baru.
+                noteOrderFinished(sbn.packageName, deliveryIdentity, sbn.postTime)
                 dismissDeliveryPills(sbn.packageName, sbn.postTime, deliveryIdentity)
                 // Update same-key yang berubah jadi SELESAI tapi pill-nya belum ke-track
                 // (bridgeId deterministik dari key): pastikan ikut dicancel.
@@ -1212,6 +1252,7 @@ class NotificationReaderService : NotificationListenerService() {
                 val finishIdentity = deliveryIdentityOf(sbn, deliveryCorpus)
                 // Ingat sinyal tuntas walau pill belum ada (urutan sync: Feedback
                 // diproses duluan, stage "is here" menyusul — pill harus ikut bunuh).
+                noteOrderFinished(sbn.packageName, finishIdentity, sbn.postTime)
                 pendingDeliveryFinished.merge(
                     sbn.packageName,
                     PendingDeliveryFinish(sbn.postTime, finishIdentity)
@@ -1256,6 +1297,7 @@ class NotificationReaderService : NotificationListenerService() {
                 val sameOrder = finIdentity != null && finIdentity == deliveryIdentity
                 val cutoff = if (sameOrder) finTime + FINISH_SAME_ORDER_GRACE_MS else finTime
                 if (finTime > 0L && sbn.postTime <= cutoff) {
+                    noteOrderFinished(sbn.packageName, finIdentity, finTime)
                     dismissDeliveryPills(sbn.packageName, finTime, finIdentity)
                     cancelBridgeId(sbn.key.hashCode())
                     // Juga bunuh bridge id yatim yang menempel key stage ini
@@ -1539,6 +1581,14 @@ class NotificationReaderService : NotificationListenerService() {
                     return
                 }
 
+                // Order sudah tuntas & stage ini basi -> jangan hidupkan pill lagi.
+                if (type == NotificationType.DELIVERY && isStageAfterFinish(sbn.packageName, deliveryIdentity, sbn.postTime)) {
+                    Log.w(TAG, "DELIVERY-FINISHED-LATE skip pkg=${sbn.packageName} key=$key postTime=${sbn.postTime}")
+                    cancelBridgeId(bridgeId)
+                    cleanupCache(effectiveKey)
+                    return
+                }
+
                 if (!shouldAlertOnce) {
                     ShizukuManager.notify(this, bridgeId, notification)
                 } else {
@@ -1560,6 +1610,7 @@ class NotificationReaderService : NotificationListenerService() {
                     deliveryContentTime[effectiveKey] = sbn.postTime
                     deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
                     pendingDeliveryFinished.remove(sbn.packageName)
+                    cancelPostAfterFinish(sbn.packageName, deliveryIdentity, bridgeId, effectiveKey)
                 }
                 updatePermanentIsland()
 
@@ -1603,6 +1654,14 @@ class NotificationReaderService : NotificationListenerService() {
                 return
             }
 
+            // Order sudah tuntas & stage ini basi -> jangan hidupkan pill lagi.
+            if (type == NotificationType.DELIVERY && isStageAfterFinish(sbn.packageName, deliveryIdentity, sbn.postTime)) {
+                Log.w(TAG, "DELIVERY-FINISHED-LATE skip pkg=${sbn.packageName} key=$key postTime=${sbn.postTime}")
+                cancelBridgeId(bridgeId)
+                cleanupCache(effectiveKey)
+                return
+            }
+
             kotlinx.coroutines.yield()
 
             val removedTime = recentlyRemovedKeys[rawSbn.key]
@@ -1633,6 +1692,7 @@ class NotificationReaderService : NotificationListenerService() {
                 deliveryContentTime[effectiveKey] = sbn.postTime
                 deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
                 pendingDeliveryFinished.remove(sbn.packageName)
+                cancelPostAfterFinish(sbn.packageName, deliveryIdentity, bridgeId, effectiveKey)
             }
             // Cek-tuntas berjangkar ETA (tanpa ETA = fallback 45 mnt). Dijadwal ulang
             // bila async RV menemukan ETA asli. Custom path saja (native punya timeout sendiri).
@@ -1717,6 +1777,10 @@ class NotificationReaderService : NotificationListenerService() {
 
             handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, false, sbn, effectiveTitle, effectiveText)
 
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Coroutine-nya dibatal (mis. service shut down / job lama dibuang):
+            // biarkan naik, jangan diproses setengah-setengah jadi 💥 palsu.
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "💥 Error processing standard notification", e)
         }
