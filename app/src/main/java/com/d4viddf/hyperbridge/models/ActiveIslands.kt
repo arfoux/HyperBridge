@@ -19,5 +19,8 @@ data class ActiveIsland(
     // Fingerprint RemoteViews (reflection 1-3ms, tanpa inflate): Grab update stage
     // via RV sementara extras statis — tanpa ini update RV-only selalu di-skip dedup
     // dan pill cuma berubah pas toggle layar (reprocess paksa).
-    val rvHash: Int = 0
+    val rvHash: Int = 0,
+    // Hash konten TANPA postTime. Dipakai untuk deteksi swipe: re-post stage identik
+    // dari app tetap punya hash ini sama, jadi pill yang di-swipe tidak muncul lagi.
+    val dismissHash: Int = 0
 )

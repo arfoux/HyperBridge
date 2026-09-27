@@ -265,15 +265,14 @@ object TestNotificationHelper {
         android.util.Log.w("HyperBridgeTest", "POSTED HIST-GRAB-TRANSACTION onway Burjo")
     }
 
-    /** Grab live-activity RV-only kemarin: extras kosong + RV bawa ETA "Tiba 16:26". */
-    fun postHistoryGrabLiveEta(context: Context) {
+    /** Grab live-activity RV-only: extras kosong + RV membawa ETA menit yang bisa berubah. */
+    fun postHistoryGrabLiveEta(context: Context, etaMinutes: Int = 7) {
         val chId = "live_activity_channel_01"
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(chId, "Live Activity (history replay)", NotificationManager.IMPORTANCE_HIGH))
         val rv = android.widget.RemoteViews(context.packageName, android.R.layout.simple_list_item_1)
-        // "Tiba dalam 7 menit" (bukan "Tiba 16:26" kemarin — jam sudah lewat,
-        // single-time dihitung dari sekarang; menit tertulis stabil kapan pun).
-        rv.setTextViewText(android.R.id.text1, "Burjo Titik Kumpul - Tembalang is on the way to you. Tiba dalam 7 menit")
+        val eta = etaMinutes.coerceIn(1, 240)
+        rv.setTextViewText(android.R.id.text1, "Burjo Titik Kumpul - Tembalang is on the way to you. Tiba dalam $eta menit")
         val builder = NotificationCompat.Builder(context, chId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
@@ -289,7 +288,7 @@ object TestNotificationHelper {
         notif.extras.putString(EXTRA_REAL_PKG, "com.grabtaxi.passenger")
         notif.extras.putBoolean("android.contains.customView", true)
         nm.notify(REAL_GRAB_BASE_ID + 21, notif)
-        android.util.Log.w("HyperBridgeTest", "POSTED HIST-GRAB-LIVE-ETA rv=Tiba dalam 7 menit")
+        android.util.Log.w("HyperBridgeTest", "POSTED HIST-GRAB-LIVE-ETA rv=Tiba dalam $eta menit")
     }
 
     /** Shopee MENUJU (MOMOYO + Tiba pada 20:25): latihan jalur ETA extras. */

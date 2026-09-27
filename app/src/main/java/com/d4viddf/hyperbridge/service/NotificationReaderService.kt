@@ -57,13 +57,53 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Exact shape gate for Grab's live-activity envelope and its RV child.
+ *
+ * The observed Grab envelope is an empty FLAG_GROUP_SUMMARY notification; a
+ * group-summary flag by itself is not enough because Offers/Feedback also use
+ * grouped notifications. The helper deliberately uses only the stable signal
+ * shape so an unrelated Grab summary cannot become DELIVERY.
+ */
+internal fun isGrabLiveActivityShape(
+    grabPipeline: Boolean,
+    channelId: String?,
+    groupSummary: Boolean,
+    groupKey: String?,
+    hasCustomView: Boolean,
+    hasRemoteView: Boolean,
+    title: String,
+    text: String
+): Boolean {
+    if (!grabPipeline || !channelId.orEmpty().contains("live_activity", ignoreCase = true)) return false
+    if (!groupSummary) return hasCustomView || hasRemoteView
+    return !hasCustomView &&
+        !hasRemoteView &&
+        !groupKey.isNullOrBlank() &&
+        title.isBlank() &&
+        text.isBlank()
+}
+
+/**
+ * Dua sisi dianggap order sama kecuali keduanya punya identity DAN berbeda.
+ *
+ * Identity null berarti "tidak bisa dibedakan" (mis. rating/feedback tanpa liveId),
+ * bukan "order lain": kalau diartikan order lain, sinyal tuntas tanpa liveId tidak
+ * akan pernah menutup pill, dan sweep orphan mati total setelah restart karena
+ * deliveryOrderIdentity kosong. Sisa proteksi tetap datang dari batas postTime.
+ */
+internal fun deliveryOrderMatches(signalIdentity: String?, activeIdentity: String?): Boolean {
+    if (signalIdentity == null || activeIdentity == null) return true
+    return signalIdentity == activeIdentity
+}
+
 class NotificationReaderService : NotificationListenerService() {
 
     companion object {
         const val ACTION_RELOAD_THEME = "com.d4viddf.hyperbridge.ACTION_RELOAD_THEME"
         const val ACTION_PERFORM_MIGRATION = "com.d4viddf.hyperbridge.ACTION_PERFORM_MIGRATION"
-        /** Toleransi postTime sinyal tuntas vs update pill terakhir (burst order sama). */
-        const val FINISH_POST_GRACE_MS = 60 * 60_000L
+        /** Toleransi hanya untuk update order yang sama setelah sinyal tuntas. */
+        const val FINISH_SAME_ORDER_GRACE_MS = 2 * 60_000L
     }
 
     private val TAG = "HyperBridgeDebug"
@@ -101,9 +141,15 @@ class NotificationReaderService : NotificationListenerService() {
     // postTime ORIGINAAL (sbn.postTime) dari konten yang sedang tampil per tracked-key.
     // Dipakai gate freshness collapse agar stage lama tak menimpa stage baru.
     private val deliveryContentTime = ConcurrentHashMap<String, Long>()
-    // Sinyal order tuntas (Feedback/rating) per paket — pill boleh belum ada saat
-    // sinyal diproses (urutan sync); stage menyusul wajib ikut dibunuh.
-    private val pendingDeliveryFinished = ConcurrentHashMap<String, Long>()
+    // Sinyal order tuntas per paket; identity mencegah rating order lama
+    // mematikan stage order baru yang sama package.
+    private data class PendingDeliveryFinish(
+        val postTime: Long,
+        val orderIdentity: String?
+    )
+    private val pendingDeliveryFinished = ConcurrentHashMap<String, PendingDeliveryFinish>()
+    // Identity order yang sedang diposting per tracked source key.
+    private val deliveryOrderIdentity = ConcurrentHashMap<String, String>()
     // Timer cek-tuntas berjangkar ETA: 1 job per pill delivery (custom path saja).
     private val deliveryEtaJobs = ConcurrentHashMap<String, Job>()
     private val timeoutJobs = ConcurrentHashMap<String, Job>()
@@ -462,7 +508,7 @@ class NotificationReaderService : NotificationListenerService() {
                     }
                     // Swipe user = jangan tampilkan konten identik 30 mnt (ori masih
                     // hidup -> sync/update Grab bakal me-repost; tanpa ini swipe sia-sia).
-                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
+                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.dismissHash) }
                     cleanupCache(originalKey)
                 }
                 return
@@ -490,7 +536,7 @@ class NotificationReaderService : NotificationListenerService() {
                         try {
                             NotificationManagerCompat.from(this@NotificationReaderService).cancel(hyperId)
                         } catch (_: Exception) {}
-                        activeIslands[notifKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
+                        activeIslands[notifKey]?.let { noteDismissed(it.packageName, it.dismissHash) }
                         cleanupCache(notifKey)
                     }
                     removalJobs.remove(notifKey)
@@ -541,6 +587,7 @@ class NotificationReaderService : NotificationListenerService() {
         activeIslands.remove(originalKey)
         activeTranslations.remove(originalKey)
         deliveryContentTime.remove(originalKey)
+        deliveryOrderIdentity.remove(originalKey)
         deliveryEtaJobs[originalKey]?.cancel()
         deliveryEtaJobs.remove(originalKey)
         timeoutJobs[originalKey]?.cancel()
@@ -554,7 +601,7 @@ class NotificationReaderService : NotificationListenerService() {
 
     /** Buang sinyal tuntas basi (>6 jam) agar order baru tak kena sisa feedback lama. */
     private fun prunePendingDeliveryFinished(now: Long) {
-        pendingDeliveryFinished.entries.removeIf { now - it.value > 6 * 60 * 60_000L }
+        pendingDeliveryFinished.entries.removeIf { now - it.value.postTime > 6 * 60 * 60_000L }
     }
 
     /** Ada RemoteViews di notif (korpus bisa beda walau extras/contentHash sama). */
@@ -577,28 +624,60 @@ class NotificationReaderService : NotificationListenerService() {
         return !hasRemoteViews(sbn)
     }
 
+    private val grabFeedbackRestoRegex = Regex("\\b(?:about|feedback on)\\s+([^.!?]+)", RegexOption.IGNORE_CASE)
+
     /**
-     * Bunuh pill DELIVERY milik satu paket (order tuntas / ganti key).
-     * [maxPostTime] terisi = hanya pill yang dianggap order sama / lebih tua dari
-     * sinyal tuntas — feedback basi kemarin tidak boleh bunuh order BARU.
-     * Grace 60 mnt: burst stage+feedback dalam order yang sama boleh punya postTime
-     * tidak berurutan (update pill sering LEBIH BARU dari notif feedback).
+     * Identity yang tersedia tanpa notified order-id: Shopee liveId atau resto Grab.
+     * Jangan memakai cache resto di sini; cache bisa milik order sebelumnya.
      */
-    private fun dismissDeliveryPills(pkg: String, maxPostTime: Long? = null) {
+    private fun deliveryIdentityOf(sbn: StatusBarNotification, corpus: String = sbnCorpus(sbn)): String? {
+        sbn.notification.extras.getString("extra_live_activity_id")?.takeIf { it.isNotBlank() }?.let { return it }
+        if (!isGrabPipeline(sbn)) return null
+
+        val resto = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(corpus)
+            ?: grabFeedbackRestoRegex.find(corpus)?.groupValues?.getOrNull(1)
+        val normalized = resto?.trim()?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), " ")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        return normalized?.let { "grab:${sbn.packageName}:$it" }
+    }
+
+    /** Feedback/rating boleh jadi penutup; channel promo/operasional tidak. */
+    private fun isDeliveryFinishCandidate(sbn: StatusBarNotification): Boolean {
+        if (!com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(sbnCorpus(sbn))) return false
+        val channel = sbn.notification.channelId.orEmpty().lowercase()
+        return !listOf("offers", "promo", "voucher", "campaign", "marketing")
+            .any { it in channel }
+    }
+
+    /**
+     * Bunuh pill DELIVERY milik satu paket. [maxPostTime] dan [orderIdentity]
+     * dipakai bersama: sinyal lama hanya boleh menutup stage yang lebih tua, dan
+     * tidak boleh menutup order berbeda dalam paket yang sama.
+     */
+    private fun dismissDeliveryPills(
+        pkg: String,
+        maxPostTime: Long? = null,
+        orderIdentity: String? = null,
+        trackedKey: String? = null
+    ) {
         val stale = activeIslands.entries.filter {
             it.value.type == NotificationType.DELIVERY && it.value.packageName == pkg &&
-                (maxPostTime == null ||
-                    (deliveryContentTime[it.key] ?: 0L) <= maxPostTime + FINISH_POST_GRACE_MS)
+                (trackedKey == null || it.key == trackedKey) &&
+                deliveryOrderMatches(orderIdentity, deliveryOrderIdentity[it.key]) &&
+                (maxPostTime == null || (deliveryContentTime[it.key] ?: 0L) <= maxPostTime)
         }
         for ((staleKey, island) in stale) {
             cancelBridgeId(island.id)
-            noteDismissed(island.packageName, island.lastContentHash)
+            noteDismissed(island.packageName, island.dismissHash)
             cleanupCache(staleKey)
         }
         // Orphan bridge notif (proses lama / reverseTranslations kosong): cancel id
         // yang menempel ke paket ini via EXTRA_ORIGINAL_KEY — activeIslands alone miss.
-        cancelOrphanBridgeNotificationsForPackage(pkg, maxPostTime)
-        if (stale.isNotEmpty()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg")
+        cancelOrphanBridgeNotificationsForPackage(pkg, maxPostTime, orderIdentity, trackedKey)
+        if (stale.isNotEmpty()) Log.w(TAG, "DELIVERY-DISMISS ${stale.size} pill(s) pkg=$pkg order=$orderIdentity")
     }
 
     /** Compat cancel SELALU jalan walau Shizuku gagal/throw (orphan tak boleh lolos). */
@@ -612,7 +691,12 @@ class NotificationReaderService : NotificationListenerService() {
      * (atau key delivery package) — tutup slot setelah sinyal tuntas walau
      * activeIslands/reverseTranslations sudah kosong (restart / FINISHED duluan).
      */
-    private fun cancelOrphanBridgeNotificationsForPackage(pkg: String, maxPostTime: Long? = null) {
+    private fun cancelOrphanBridgeNotificationsForPackage(
+        pkg: String,
+        maxPostTime: Long? = null,
+        orderIdentity: String? = null,
+        trackedKey: String? = null
+    ) {
         try {
             val list = activeNotifications ?: return
             for (n in list) {
@@ -624,10 +708,13 @@ class NotificationReaderService : NotificationListenerService() {
                 if ((n.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) continue
                 val origKey = n.notification.extras.getString(EXTRA_ORIGINAL_KEY) ?: continue
                 if (!origKey.contains(pkg)) continue
-                // Grace sama dgn victims: pill order BARU (postTime bridge baru) jangan
-                // ikut kebunuh feedback basi. Orphan lama postTime tua = lolos cancel.
-                if (maxPostTime != null && n.postTime > maxPostTime + FINISH_POST_GRACE_MS) continue
-                Log.w(TAG, "DELIVERY-ORPHAN-CANCEL id=$id origKey=$origKey pkg=$pkg postTime=${n.postTime} maxPostTime=$maxPostTime")
+                if (trackedKey != null && origKey != trackedKey) continue
+                val activeIdentity = deliveryOrderIdentity[origKey]
+                if (!deliveryOrderMatches(orderIdentity, activeIdentity)) continue
+                // Tanpa grace future: bridge yang lahir sesudah sinyalbelongs order
+                // berikutnya dan tidak boleh ikut dibunuh rating lama.
+                if (maxPostTime != null && n.postTime > maxPostTime) continue
+                Log.w(TAG, "DELIVERY-ORPHAN-CANCEL id=$id origKey=$origKey pkg=$pkg postTime=${n.postTime} maxPostTime=$maxPostTime order=$orderIdentity")
                 cancelBridgeId(id)
                 reverseTranslations.remove(id)
             }
@@ -699,13 +786,13 @@ class NotificationReaderService : NotificationListenerService() {
         ).joinToString(" ")
         if (com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(corpus)) {
             if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ETA-DONE dismiss key=$trackedKey pkg=$pkg")
-            dismissDeliveryPills(pkg)
+            dismissDeliveryPills(pkg, orderIdentity = deliveryOrderIdentity[trackedKey], trackedKey = trackedKey)
             return true
         }
         val lastUpdate = deliveryContentTime[trackedKey] ?: 0L
         if (lastUpdate > 0 && System.currentTimeMillis() - lastUpdate > (etaMin + 30) * 60_000L) {
             if (debugLogEnabled()) Log.w(TAG, "DELIVERY-ETA-SILENCE dismiss key=$trackedKey pkg=$pkg etaMin=$etaMin")
-            dismissDeliveryPills(pkg)
+            dismissDeliveryPills(pkg, orderIdentity = deliveryOrderIdentity[trackedKey], trackedKey = trackedKey)
             return true
         }
         return false
@@ -751,7 +838,7 @@ class NotificationReaderService : NotificationListenerService() {
                     delay((timeoutSeconds * 1000L).milliseconds)
                     if (debugLogEnabled()) Log.d(TAG, "Timeout reached for $originalKey, removing translated notification $bridgeId")
                     NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
-                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
+                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.dismissHash) }
                     cleanupCache(originalKey)
                     timeoutJobs.remove(originalKey)
                 }
@@ -764,7 +851,7 @@ class NotificationReaderService : NotificationListenerService() {
                 delay(STANDARD_ISLAND_TIMEOUT_MS)
                 if (debugLogEnabled()) Log.d(TAG, "Island TTL reached for $originalKey, removing translated notification $bridgeId")
                 NotificationManagerCompat.from(this@NotificationReaderService).cancel(bridgeId)
-                activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.lastContentHash) }
+                    activeIslands[originalKey]?.let { noteDismissed(it.packageName, it.dismissHash) }
                 cleanupCache(originalKey)
                 timeoutJobs.remove(originalKey)
             }
@@ -853,9 +940,11 @@ class NotificationReaderService : NotificationListenerService() {
             }
             // Shopee LIVE_ACTIVITY eligible bypass isAppAllowed jika user pernah aktifin shopee (atau auto-allow)
             val isShopeeLive = it.packageName == "com.shopee.id" && it.notification.extras.containsKey("extra_live_activity_id")
+            val isGrabDelivery = isGrabDeliveryCandidate(it)
             if (!isAppAllowed(it.packageName) && !isRealClone) {
-                if (isShopeeLive) {
-                    if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for Shopee LIVE_ACTIVITY ${it.key} -> auto-allow")
+                if (isShopeeLive || isGrabDelivery) {
+                    val label = if (isShopeeLive) "Shopee LIVE_ACTIVITY" else "Grab delivery"
+                    if (debugLogEnabled()) Log.w(TAG, "BYPASS isAppAllowed for $label ${it.key} -> auto-allow")
                     serviceScope.launch { preferences.toggleApp(it.packageName, true) }
                 } else {
                     if (debugLogEnabled()) Log.w(TAG, "BLOCKED isAppAllowed pkg=${it.packageName} allowed=$allowedPackageSet")
@@ -879,12 +968,11 @@ class NotificationReaderService : NotificationListenerService() {
                 }
                 val isJunk = isJunkNotification(it)
                 // Shopee LIVE eligible jangan dianggap junk (voucher SUMMARY sudah di-filter di isJunk tapi live tetap eligible)
-                // REAL-clone juga jangan dianggap junk: marker + liveId + title/text selalu non-empty.
-                if (isJunk && !isShopeeLive && !isRealClone) {
+                if (isJunk && !isShopeeLive && !isGrabDelivery && !isRealClone) {
                     if (debugLogEnabled()) Log.w(TAG, "JUNK skip ${it.key} pkg=${it.packageName}")
                     return@launch
                 }
-                if (isJunk && (isShopeeLive || isRealClone)) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for ${if (isRealClone) "REAL-CLONE" else "Shopee LIVE"} ${it.key}")
+                if (isJunk && (isShopeeLive || isGrabDelivery || isRealClone)) if (debugLogEnabled()) Log.w(TAG, "BYPASS junk for ${if (isRealClone) "REAL-CLONE" else if (isShopeeLive) "Shopee LIVE" else "Grab DELIVERY"} ${it.key}")
                 processStandardNotification(it)
             }
             processingJobs[it.key] = job
@@ -922,19 +1010,17 @@ class NotificationReaderService : NotificationListenerService() {
                 val info = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim()
                 effectiveText = big?.takeIf { it.isNotEmpty() } ?: sub?.takeIf { it.isNotEmpty() } ?: info ?: ""
             }
-            // Grab live-activity RV-only: extras null semua -> judul generik (BUKAN label
-            // app "Grab"); isi stage/ETA datang dari korpus RV via translator/async.
-            if (effectiveTitle.isEmpty() && isGrabPipeline(sbn) &&
-                extras.getBoolean("android.contains.customView", false)
-            ) {
+            // Grab live activity can be an RV child or an empty grouped summary. Both
+            // have no useful extras title; use the generic Delivery title without
+            // fabricating a stage. A staged sibling may supply the current details.
+            val isGrabLiveActivity = isGrabLiveActivityNotification(sbn)
+            if (effectiveTitle.isEmpty() && isGrabLiveActivity) {
                 effectiveTitle = getString(R.string.type_delivery)
             }
             // Tile live Grab grafis minim-teks: pinjam judul+teks dari sibling
             // Transaction BER-STAGE terbaru (100% extras, tanpa inflate). Tanpa ini
             // pill RV-only kosong plong (cuma ETA).
-            if (effectiveText.isEmpty() && isGrabPipeline(sbn) &&
-                extras.getBoolean("android.contains.customView", false)
-            ) {
+            if (effectiveText.isEmpty() && isGrabLiveActivity) {
                 try {
                     // Wajib pola stage order — promo/operasional tidak boleh dipinjam.
                     // Filter staged DULU lalu maxBy: kandidat terbaru yang staged menang,
@@ -1002,10 +1088,8 @@ class NotificationReaderService : NotificationListenerService() {
             // dan GrabFood live-activity (teks hanya di RV, extras null — dibaca async).
             val hasProgress = hasProgressNotification(sbn, effectiveTitle, effectiveText)
             val isShopeeLiveEligible = sbn.packageName == "com.shopee.id" && extras.containsKey("extra_live_activity_id")
-            val isGrabLiveEligible = isGrabPipeline(sbn) &&
-                extras.getBoolean("android.contains.customView", false) &&
-                (sbn.notification.channelId?.contains("live_activity", ignoreCase = true) == true)
-            if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible && !isGrabLiveEligible) {
+            val isGrabDelivery = isGrabDeliveryCandidate(sbn)
+            if (effectiveTitle.isEmpty() && !hasProgress && !isShopeeLiveEligible && !isGrabDelivery) {
                 if (debugLogEnabled()) Log.w(TAG, "HARD-STOP empty title for ${sbn.packageName} (not live)")
                 return
             }
@@ -1039,6 +1123,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
                 deliveryFastHash = try {
                     var h = effectiveTitle.hashCode() * 31 + effectiveText.hashCode()
+                    h = h * 31 + sbn.postTime.hashCode()
                     h = h * 31 + (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.hashCode() ?: 0)
                     h = h * 31 + (extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.hashCode() ?: 0)
                     h = h * 31 + extras.getInt(Notification.EXTRA_PROGRESS, 0) + extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
@@ -1048,7 +1133,10 @@ class NotificationReaderService : NotificationListenerService() {
                 if (deliveryFastHash != 0 && previous != null && previous.type == NotificationType.DELIVERY &&
                     previous.fastHash == deliveryFastHash &&
                     deliveryContentUnchanged(previous, previous.lastContentHash, sbn)
-                ) return
+                ) {
+                    if (debugLogEnabled()) Log.d(TAG, "DEDUP-SAME skip pkg=${sbn.packageName} key=$key type=$type path=fast")
+                    return
+                }
             }
             // --- TEST vs REAL logging + simpan notif (untuk permanen/order) ---
             val isTestNotif = extras.getBoolean("hyperbridge_test", false)
@@ -1094,10 +1182,16 @@ class NotificationReaderService : NotificationListenerService() {
                 extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty(),
                 extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
             ).joinToString(" ")
+            val deliveryIdentity = if (type == NotificationType.DELIVERY) {
+                deliveryIdentityOf(sbn, deliveryCorpus)
+            } else {
+                null
+            }
             if (type == NotificationType.DELIVERY &&
                 com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinished(deliveryCorpus)
             ) {
-                dismissDeliveryPills(sbn.packageName, sbn.postTime)
+                // Sinyal tuntas hanya menutup source yang tidak lebih baru.
+                dismissDeliveryPills(sbn.packageName, sbn.postTime, deliveryIdentity)
                 // Update same-key yang berubah jadi SELESAI tapi pill-nya belum ke-track
                 // (bridgeId deterministik dari key): pastikan ikut dicancel.
                 try {
@@ -1112,52 +1206,62 @@ class NotificationReaderService : NotificationListenerService() {
             // Hanya pill yang LEBIH TUA dari sinyal tuntas — feedback basi kemarin
             // tidak boleh membunuh pill order baru hari ini.
             if (type != NotificationType.DELIVERY &&
-                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus)
+                com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(deliveryCorpus) &&
+                isDeliveryFinishCandidate(sbn)
             ) {
-                // Ingate sinyal tuntas walau pill belum ada (urutan sync: Feedback
+                val finishIdentity = deliveryIdentityOf(sbn, deliveryCorpus)
+                // Ingat sinyal tuntas walau pill belum ada (urutan sync: Feedback
                 // diproses duluan, stage "is here" menyusul — pill harus ikut bunuh).
-                pendingDeliveryFinished.merge(sbn.packageName, sbn.postTime, ::maxOf)
+                pendingDeliveryFinished.merge(
+                    sbn.packageName,
+                    PendingDeliveryFinish(sbn.postTime, finishIdentity)
+                ) { old, new -> if (new.postTime >= old.postTime) new else old }
                 val victims = activeIslands.entries.filter {
                     if (it.value.type != NotificationType.DELIVERY || it.value.packageName != sbn.packageName) return@filter false
                     val contentTime = deliveryContentTime[it.key] ?: 0L
-                    // Burst order sama: update pill (stage) sering lebih baru dari feedback
-                    // — grace 60 mnt. Feedback basi (kemarin) tetap gugur filter.
-                    contentTime <= sbn.postTime + FINISH_POST_GRACE_MS
+                    deliveryOrderMatches(finishIdentity, deliveryOrderIdentity[it.key]) && contentTime <= sbn.postTime
                 }
                 for ((victimKey, island) in victims) {
                     cancelBridgeId(island.id)
-                    noteDismissed(island.packageName, island.lastContentHash)
+                    noteDismissed(island.packageName, island.dismissHash)
                     cleanupCache(victimKey)
                 }
                 // Tutup juga orphan bridge (activeIslands kosong saat Feedback duluan /
                 // restart) — tanpa ini pill "is here" lama nempel selamanya.
-                cancelOrphanBridgeNotificationsForPackage(sbn.packageName, sbn.postTime)
+                cancelOrphanBridgeNotificationsForPackage(sbn.packageName, sbn.postTime, finishIdentity)
                 if (victims.isNotEmpty()) Log.w(TAG, "DELIVERY-FINISHED-OTHER dismiss ${victims.size} pill(s) pkg=${sbn.packageName} key=$key")
             }
             // Sinyal tuntas bisa diproses DULUAN (urutan newest-first): bila notif se-paket
             // lain ber-marker tuntas DAN lebih baru dari stage ini, postingan stage basi
-            // ini gugur — dismiss + skip.
-            // Grace dua arah: stage boleh sedikit lebih baru dari feedback (burst order
-            // sama). Feedback basi kemarin tetap gugur (stage >> feedback + grace).
+            // ini gugur — dismiss + skip. Grace hanya untuk order yang identity-nya sama.
             if (type == NotificationType.DELIVERY) {
                 val pendingFin = pendingDeliveryFinished[sbn.packageName]
-                val finishedSibling = try {
+                val pendingForOrder = pendingFin?.takeIf {
+                    deliveryOrderMatches(deliveryIdentity, it.orderIdentity)
+                }
+                val finishedSiblings = try {
                     activeNotifications?.filter { other ->
                         other.packageName == sbn.packageName && other.key != key &&
-                            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(sbnCorpus(other))
-                    }?.maxByOrNull { it.postTime }
-                } catch (_: Exception) { null }
+                            isDeliveryFinishCandidate(other) &&
+                            deliveryOrderMatches(deliveryIdentity, deliveryIdentityOf(other, sbnCorpus(other)))
+                    }.orEmpty()
+                } catch (_: Exception) { emptyList() }
+                val finishedSibling = finishedSiblings.maxByOrNull { it.postTime }
+                val siblingIdentity = finishedSibling?.let { deliveryIdentityOf(it, sbnCorpus(it)) }
                 val finTime = maxOf(
                     finishedSibling?.postTime ?: 0L,
-                    pendingFin ?: 0L
+                    pendingForOrder?.postTime ?: 0L
                 )
-                if (finTime > 0L && sbn.postTime <= finTime + FINISH_POST_GRACE_MS) {
-                    dismissDeliveryPills(sbn.packageName, finTime)
+                val finIdentity = siblingIdentity ?: pendingForOrder?.orderIdentity
+                val sameOrder = finIdentity != null && finIdentity == deliveryIdentity
+                val cutoff = if (sameOrder) finTime + FINISH_SAME_ORDER_GRACE_MS else finTime
+                if (finTime > 0L && sbn.postTime <= cutoff) {
+                    dismissDeliveryPills(sbn.packageName, finTime, finIdentity)
                     cancelBridgeId(sbn.key.hashCode())
                     // Juga bunuh bridge id yatim yang menempel key stage ini
-                    cancelOrphanBridgeNotificationsForPackage(sbn.packageName, finTime)
+                    cancelOrphanBridgeNotificationsForPackage(sbn.packageName, finTime, finIdentity)
                     cleanupCache(key)
-                    Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key finTime=$finTime postTime=${sbn.postTime}")
+                    Log.w(TAG, "DELIVERY-FINISHED-SIBLING dismiss pkg=${sbn.packageName} key=$key finTime=$finTime postTime=${sbn.postTime} order=$finIdentity")
                     return
                 }
             }
@@ -1212,8 +1316,7 @@ class NotificationReaderService : NotificationListenerService() {
             if (type == NotificationType.DELIVERY) {
                 // Single-pill: stage update via key baru selagi key lama masih hidup
                 // -> tanpa collapse ini muncul double pill (satu stuck stage lama).
-                val incomingSig: String? = if (isGrabPipeline(sbn)) "grab:${sbn.packageName}"
-                    else extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
+                val incomingSig = deliveryOrderSig(sbn)
                 val dupes = activeIslands.entries.filter {
                     it.value.type == NotificationType.DELIVERY &&
                         it.value.packageName == sbn.packageName && it.key != key &&
@@ -1222,7 +1325,7 @@ class NotificationReaderService : NotificationListenerService() {
                 for ((dupeKey, island) in dupes) {
                     try {
                         ShizukuManager.cancel(this@NotificationReaderService, island.id)
-                        NotificationManagerCompat.from(this@NotificationReaderService).cancel(island.id)
+                        NotificationManagerCompat.from(this).cancel(island.id)
                     } catch (_: Exception) {}
                     cleanupCache(dupeKey)
                     Log.w(TAG, "DELIVERY-DEDUP cancel $dupeKey keep $key")
@@ -1234,13 +1337,17 @@ class NotificationReaderService : NotificationListenerService() {
             removalJobs.remove(effectiveKey)
             var isUpdate = activeIslands.containsKey(effectiveKey)
             var bridgeId = sbn.key.hashCode()
+            // Update WAJIB post ke bridge yang sama. Tanpa ini stage berikutnya untuk
+            // key yang sama (mis. setelah DELIVERY-COLLAPSE pindah state) akan memakai
+            // key.hashCode() yang berbeda -> pill lama tidak pernah dicancel, jadi satu
+            // order jadi dua pill.
+            if (isUpdate) activeIslands[effectiveKey]?.let { bridgeId = it.id }
 
-            // DELIVERY satu order = satu pill: update stage (key baru) menimpa island
-            // order aktif yg sama (liveId Grab=nempel per-pkg, Shopee=liveId), bukan nambah pill.
+            // DELIVERY satu order = satu pill: stage update via key baru menimpa
+            // island aktif, lalu key state dipindahkan ke source terbaru. Dengan
+            // begitu source lama yang dibatalkan tidak mematikan stage baru.
             if (!isUpdate && type == NotificationType.DELIVERY) {
-                val grabKey = if (isGrabPipeline(sbn)) "grab:${sbn.packageName}" else null
-                val liveId = extras.getString("extra_live_activity_id")
-                val orderSig = grabKey ?: liveId?.takeIf { it.isNotEmpty() }
+                val orderSig = deliveryOrderSig(sbn)
                 if (orderSig != null) {
                     val existingEntry = activeIslands.entries.find {
                         it.value.type == NotificationType.DELIVERY && it.value.packageName == sbn.packageName &&
@@ -1248,35 +1355,46 @@ class NotificationReaderService : NotificationListenerService() {
                     }
                     if (existingEntry != null && existingEntry.key != key) {
                         // Freshness: jangan biarkan stage LAMA menimpa stage BARU.
-                        // Shade/listing umumnya newest-first -> saat burst reprocess,
-                        // key lama (postTime lebih kecil) datang belakangan dan harus skip.
                         val shownTime = deliveryContentTime[existingEntry.key]
                         if (shownTime != null && sbn.postTime < shownTime) {
                             Log.w(TAG, "DELIVERY-STALE skip key=$key (older than shown) pkg=${sbn.packageName}")
                             return
                         }
                         val oldKey = existingEntry.key
-                        bridgeId = existingEntry.value.id
+                        val oldIsland = existingEntry.value
+                        val carriedIdentity = deliveryIdentity ?: deliveryOrderIdentity[oldKey]
+                        bridgeId = oldIsland.id
                         isUpdate = true
 
-                        // Kunci LAMA dipertahankan (jangan pindah ke key baru): update stage
-                        // Grab/Shopee ganti key tiap post — pindah key = island lama yatim.
+                        // Pindahkan seluruh state, bukan hanya bridgeId. Jika key lama
+                        // dibiarkan, onNotificationRemoved-nya bisa mematikan pill baru.
+                        activeIslands.remove(oldKey)
                         activeTranslations.remove(oldKey)
+                        deliveryContentTime.remove(oldKey)
+                        deliveryOrderIdentity.remove(oldKey)
+                        deliveryEtaJobs[oldKey]?.cancel()
+                        deliveryEtaJobs.remove(oldKey)
                         timeoutJobs[oldKey]?.cancel()
                         timeoutJobs.remove(oldKey)
                         removalJobs[oldKey]?.cancel()
                         removalJobs.remove(oldKey)
-                        // Hapus notif bridge lama BILA id berubah (jangan tumpuk dua pill).
-                        if (existingEntry.value.id != bridgeId) {
-                            try {
-                                ShizukuManager.cancel(this, existingEntry.value.id)
-                                NotificationManagerCompat.from(this).cancel(existingEntry.value.id)
-                            } catch (_: Exception) {}
-                        }
 
-                        effectiveKey = oldKey
+                        effectiveKey = key
                         activeTranslations[effectiveKey] = bridgeId
                         reverseTranslations[bridgeId] = effectiveKey
+                        activeIslands[effectiveKey] = oldIsland.copy(
+                            title = effectiveTitle,
+                            text = effectiveText,
+                            subText = orderSig,
+                            postTime = System.currentTimeMillis(),
+                            lastContentHash = 0,
+                            dismissHash = 0,
+                            fastHash = deliveryFastHash,
+                            rvHash = rvFingerprint(sbn)
+                        )
+                        deliveryContentTime[effectiveKey] = sbn.postTime
+                        carriedIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
+                        Log.w(TAG, "DELIVERY-COLLAPSE $oldKey -> $effectiveKey pkg=${sbn.packageName}")
                     }
                 }
             }
@@ -1398,9 +1516,14 @@ class NotificationReaderService : NotificationListenerService() {
                 val isIndeterminate = extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
                 val actionState = sbn.notification.actions?.joinToString { it.title?.toString() ?: "" } ?: ""
 
-                val newContentHash = effectiveTitle.hashCode() * 31 +
+                // postTime hanya masuk hash dedup: re-post stage identik tetap me-refresh
+                // pill. Hash dismiss TIDAK memuatnya supaya pill yang di-swipe tidak
+                // muncul lagi (isDismissSuppressed cocokkan konten, bukan waktu posting).
+                val dismissHash = (effectiveTitle.hashCode() * 31 +
                         effectiveText.hashCode() + actualProgress + actualMax +
-                        isIndeterminate.hashCode() + actionState.hashCode()
+                        isIndeterminate.hashCode() + actionState.hashCode())
+                val newContentHash = dismissHash +
+                        (if (type == NotificationType.DELIVERY) sbn.postTime.hashCode() else 0)
 
                 if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
                     (type != NotificationType.DELIVERY || deliveryContentUnchanged(previous, newContentHash, sbn))
@@ -1411,7 +1534,7 @@ class NotificationReaderService : NotificationListenerService() {
 
                 // User/sistem baru saja dismiss konten identik -> jangan post ulang.
                 // Test/clone dikecualikan agar replay stage di Test screen deterministik.
-                if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+                if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, dismissHash, sbn.postTime)) {
                     Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                     return
                 }
@@ -1427,11 +1550,17 @@ class NotificationReaderService : NotificationListenerService() {
                 activeIslands[effectiveKey] = ActiveIsland(
                     id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                     packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
-                    subText = "LiveUpdate", lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                    subText = if (type == NotificationType.DELIVERY) deliveryOrderSig(sbn).orEmpty() else "LiveUpdate",
+                    lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                    dismissHash = dismissHash,
                     fastHash = deliveryFastHash,
                     rvHash = if (type == NotificationType.DELIVERY) rvFingerprint(sbn) else 0
                 )
-                if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
+                if (type == NotificationType.DELIVERY) {
+                    deliveryContentTime[effectiveKey] = sbn.postTime
+                    deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
+                    pendingDeliveryFinished.remove(sbn.packageName)
+                }
                 updatePermanentIsland()
 
                 handlePostNotificationSideEffects(effectiveKey, bridgeId, finalConfig, type, true, sbn, effectiveTitle, effectiveText)
@@ -1455,7 +1584,12 @@ class NotificationReaderService : NotificationListenerService() {
                 else -> standardTranslator.translate(sbn, effectiveTitle, effectiveText, picKey, finalConfig, activeTheme)
             }
             // jsonParam sudah mencakup seluruh output translate (100% extras) — tanpa signature RV.
-            val newContentHash = data.jsonParam.hashCode()
+            val dismissHash = data.jsonParam.hashCode()
+            val newContentHash = if (type == NotificationType.DELIVERY) {
+                dismissHash * 31 + sbn.postTime.hashCode()
+            } else {
+                dismissHash
+            }
             if (isUpdate && previous != null && previous.lastContentHash == newContentHash &&
                 (type != NotificationType.DELIVERY || deliveryContentUnchanged(previous, newContentHash, sbn))
             ) {
@@ -1464,7 +1598,7 @@ class NotificationReaderService : NotificationListenerService() {
             }
 
             // User/sistem baru saja dismiss konten identik -> jangan post ulang.
-            if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, newContentHash, sbn.postTime)) {
+            if (!isTestNotif && !isRealClonePost && isDismissSuppressed(sbn.packageName, dismissHash, sbn.postTime)) {
                 Log.w(TAG, "SUPPRESSED-SWIPE skip pkg=${sbn.packageName} key=$key")
                 return
             }
@@ -1486,18 +1620,20 @@ class NotificationReaderService : NotificationListenerService() {
 
             // subText menyimpan signature order DELIVERY (liveId / grab:pkg) agar
             // stage berikutnya menimpa island yg sama (satu order = satu pill).
-            val deliveryOrderSig = if (type == NotificationType.DELIVERY) {
-                extras.getString("extra_live_activity_id")?.takeIf { it.isNotEmpty() }
-                    ?: if (isGrabPipeline(sbn)) "grab:${sbn.packageName}" else ""
-            } else ""
+            val orderSig = if (type == NotificationType.DELIVERY) deliveryOrderSig(sbn).orEmpty() else ""
             activeIslands[effectiveKey] = ActiveIsland(
                 id = bridgeId, type = type, postTime = System.currentTimeMillis(),
                 packageName = sbn.packageName, groupKey = sbn.groupKey, title = effectiveTitle, text = effectiveText,
-                subText = deliveryOrderSig, lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                subText = orderSig, lastContentHash = newContentHash, deleteIntent = sbn.notification.deleteIntent,
+                dismissHash = dismissHash,
                 fastHash = deliveryFastHash,
                 rvHash = if (type == NotificationType.DELIVERY) rvFingerprint(sbn) else 0
             )
-            if (type == NotificationType.DELIVERY) deliveryContentTime[effectiveKey] = sbn.postTime
+            if (type == NotificationType.DELIVERY) {
+                deliveryContentTime[effectiveKey] = sbn.postTime
+                deliveryIdentity?.let { deliveryOrderIdentity[effectiveKey] = it }
+                pendingDeliveryFinished.remove(sbn.packageName)
+            }
             // Cek-tuntas berjangkar ETA (tanpa ETA = fallback 45 mnt). Dijadwal ulang
             // bila async RV menemukan ETA asli. Custom path saja (native punya timeout sendiri).
             if (type == NotificationType.DELIVERY) {
@@ -1516,16 +1652,15 @@ class NotificationReaderService : NotificationListenerService() {
             // ASYNC SKIP: notif teks biasa (contentView null, mis. Transaction) tak punya
             // RV — inflate pasti miss; jangan buang kerja background (bukti: corpus='null').
             if (type == NotificationType.DELIVERY && !getEffectiveEngine(sbn.packageName)) {
-                val hasRv = sbn.notification.contentView != null || sbn.notification.bigContentView != null ||
-                    sbn.notification.headsUpContentView != null
+                val hasRv = hasRemoteViews(sbn)
                 val hasEta = data.jsonParam.contains("\"imageTextInfoRight\"") && !data.jsonParam.contains("\"imageTextInfoRight\":{\"type\":2,\"picInfo\":{\"type\":1,\"pic\":\"miui.focus.pic_hidden_pixel\"},\"textInfo\":{\"title\":\"\",\"content\":\"\"}}")
                 // Fallback check lebih simple: jika eta kosong, json akan punya title:"" di right
                 val isEtaEmpty = data.jsonParam.contains("\"textInfo\":{\"title\":\"\"") && data.jsonParam.contains("imageTextInfoRight")
-                val isGrabRvOnly = isGrabPipeline(sbn) &&
-                    effectiveTitle.isEmpty() && effectiveText.isEmpty()
+                val isGrabRvOnly = isGrabPipeline(sbn) && hasRv
                 if ((isEtaEmpty || !hasEta || isGrabRvOnly) && hasRv) {
                     val sbnKey = sbn.key
                     val capturedSbn = sbn
+                    val capturedPostTime = sbn.postTime
                     val capturedPicKey = picKey
                     val capturedConfig = finalConfig
                     val capturedTheme = activeTheme
@@ -1541,9 +1676,13 @@ class NotificationReaderService : NotificationListenerService() {
                             // Tetap async setelah pill — pill tidak delay.
                             val rvCorpus: String? = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRemoteViewsCorpusWithContext(applicationContext, capturedSbn)
                             val rvEta = rvCorpus?.let { com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractEtaFromCorpus(it) }
-                            // Jangan hidupkan lagi pill yang sudah di-dismiss
-                            // (mis. SELESAI datang dalam 80ms jeda async).
+                            // Jangan hidupkan lagi pill yang sudah di-dismiss atau
+                            // menulis stage lama setelah source yang lebih baru masuk.
                             if (!activeIslands.containsKey(capturedEffectiveKey)) return@launch
+                            if (deliveryContentTime[capturedEffectiveKey] != null &&
+                                deliveryContentTime[capturedEffectiveKey] != capturedPostTime) return@launch
+                            deliveryIdentityOf(capturedSbn, rvCorpus ?: "$capturedTitle $capturedText")
+                                ?.let { deliveryOrderIdentity[capturedEffectiveKey] = it }
                             // GRAB RV-only: korpus RV = isi utama (stage/ETA/shade), update walau tanpa ETA.
                             // Shopee: hanya update bila ketemu waktu baru (pinjaman lama tetap tampil bila miss).
                             val isGrabUpdate = isGrabPipeline(capturedSbn) && !rvCorpus.isNullOrBlank()
@@ -1556,11 +1695,14 @@ class NotificationReaderService : NotificationListenerService() {
                                 // Update island yang sama — shouldAlertOnce=true agar tidak bunyi lagi
                                 postStandardNotification(capturedSbn, capturedBridgeId, updatedData, true)
                                 activeIslands[capturedEffectiveKey]?.let { old ->
+                                    val updatedDismissHash = updatedData.jsonParam.hashCode()
                                     activeIslands[capturedEffectiveKey] = old.copy(
-                                        lastContentHash = updatedData.jsonParam.hashCode(),
+                                        lastContentHash = updatedDismissHash * 31 + capturedPostTime.hashCode(),
+                                        dismissHash = updatedDismissHash,
                                         rvHash = rvFingerprint(capturedSbn)
                                     )
                                 }
+                                deliveryContentTime[capturedEffectiveKey] = capturedPostTime
                                 // ETA asli ketemu -> jadwal ulang cek-tuntas dengan jangkar yang benar.
                                 etaMinutesOrNull(rvEta)?.let { scheduleDeliveryEtaCheck(capturedEffectiveKey, it) }
                             } else {
@@ -1741,15 +1883,15 @@ class NotificationReaderService : NotificationListenerService() {
         val isShopeeFoodFallback = isShopee && channelId.equals("SHOPEE_FOOD_ID", ignoreCase = true) && hasFoodKeyword && !isPromo
                 // --- GRAB ELIGIBLE CHECK (observed 2026-09-17, order Burjo Titik Kumpul) ---
         // Dua jalur sejajar:
-        //  (a) live_activity_channel_01 + customView, extras NULL — isi di RemoteViews (dibaca async).
+        //  (a) live_activity_channel_01: group-summary kosong (groupKey isi, extras NULL, TANPA RV)
+        //      atau child customView/RemoteViews — isi penuh ada di RV (dibaca async).
         //  (b) channel Transaction + BigTextStyle, extras LENGKAP ("In the kitchen",
         //      "Burjo ... is preparing your order...") — stage Grab, 1:1 Shopee extras.
         // Promo ("Offers From Grab": GrabMore/Bintang Lima) + Feedback + CALL dikecualikan.
         // Operasional ("Photo upload successful" / "Thanks for helping out your driver!")
         // BUKAN stage — wajib pola status order, kata "driver" doang tidak cukup.
         val isGrab = isGrabPipeline(sbn)
-        val isGrabLiveEligible = isGrab && hasCustomView &&
-            (channelId.contains("live_activity", ignoreCase = true) || channelId.contains("grabfood", ignoreCase = true) || channelId.contains("food", ignoreCase = true))
+        val isGrabLiveEligible = isGrabLiveActivityNotification(sbn)
         val isGrabPromoChannel = channelId.contains("offers", ignoreCase = true) ||
             channelId.contains("feedback", ignoreCase = true)
         val hasGrabStage = combined.contains("preparing your order") || combined.contains("in the kitchen") ||
@@ -1978,11 +2120,13 @@ class NotificationReaderService : NotificationListenerService() {
 
         // ShopeFood LIVE eligible tidak pernah junk — ambil semua data eligible
         if (pkg == "com.shopee.id" && extras.containsKey("extra_live_activity_id")) return false
-        // GrabFood: live-activity RV-only + Transaction stage ("In the kitchen", "is here")
-        // tidak pernah junk — teks Inggris, tak cocok pola junk Indonesia.
+        // GrabFood: live-activity RV child + the observed empty live summary
+        // adalah kandidat DELIVERY, bukan junk. Other grouped notifications
+        // (Offers/Feedback) tetap envelope dan ditolak.
         if (isGrabPipeline(sbn)) {
+            if (isGrabLiveActivityNotification(sbn)) return false
+            if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return true
             val ch = notification.channelId ?: ""
-            if (ch.contains("live_activity", ignoreCase = true)) return false
             if (ch.equals("Transaction", ignoreCase = true)) {
                 val t = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
                 val b = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
@@ -2058,6 +2202,38 @@ class NotificationReaderService : NotificationListenerService() {
         val ex = sbn.notification.extras
         return ex.getBoolean(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_CLONE, false) &&
             ex.getString(com.d4viddf.hyperbridge.util.TestNotificationHelper.EXTRA_REAL_PKG) == "com.grabtaxi.passenger"
+    }
+
+    /** SBN wrapper for the exact Grab live shape; no RemoteViews inflation. */
+    private fun isGrabLiveActivityNotification(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification
+        val extras = n.extras
+        val hasRemoteView = n.contentView != null ||
+            n.bigContentView != null ||
+            n.headsUpContentView != null
+        return isGrabLiveActivityShape(
+            grabPipeline = isGrabPipeline(sbn),
+            channelId = n.channelId,
+            groupSummary = (n.flags and Notification.FLAG_GROUP_SUMMARY) != 0,
+            groupKey = sbn.groupKey,
+            hasCustomView = extras.getBoolean("android.contains.customView", false),
+            hasRemoteView = hasRemoteView,
+            title = resolveTitle(sbn),
+            text = resolveText(extras)
+        )
+    }
+
+    /** Kandidat DELIVERY Grab untuk allow-list gate; promo/feedback bukan. */
+    private fun isGrabDeliveryCandidate(sbn: StatusBarNotification): Boolean {
+        if (!isGrabPipeline(sbn)) return false
+        if (isGrabLiveActivityNotification(sbn)) return true
+        val n = sbn.notification
+        if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return false
+        val channel = n.channelId.orEmpty()
+        if (!channel.equals("Transaction", ignoreCase = true)) return false
+        val corpus = sbnCorpus(sbn)
+        return com.d4viddf.hyperbridge.util.RemoteViewsExtractor.deliveryStage(corpus) != null &&
+            !com.d4viddf.hyperbridge.util.RemoteViewsExtractor.isDeliveryFinishedStrong(corpus)
     }
 
     /** Signature satu order DELIVERY: liveId, atau grab per-paket (Grab tak punya liveId). */
