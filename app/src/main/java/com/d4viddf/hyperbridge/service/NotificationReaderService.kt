@@ -660,6 +660,10 @@ class NotificationReaderService : NotificationListenerService() {
     }
 
     private val grabFeedbackRestoRegex = Regex("\\b(?:about|feedback on)\\s+([^.!?]+)", RegexOption.IGNORE_CASE)
+    private val nonAlphaNumRegex = Regex("[^a-z0-9]+")
+    private val whitespaceCollapseServiceRegex = Regex("\\s+")
+    private val digitsServiceRegex = Regex("\\d+")
+    private val percentServiceRegex = Regex("""\b(\d{1,3})\s*%""")
 
     /**
      * Identity yang tersedia tanpa notified order-id: Shopee liveId atau resto Grab.
@@ -672,8 +676,8 @@ class NotificationReaderService : NotificationListenerService() {
         val resto = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(corpus)
             ?: grabFeedbackRestoRegex.find(corpus)?.groupValues?.getOrNull(1)
         val normalized = resto?.trim()?.lowercase()
-            ?.replace(Regex("[^a-z0-9]+"), " ")
-            ?.replace(Regex("\\s+"), " ")
+            ?.replace(nonAlphaNumRegex, " ")
+            ?.replace(whitespaceCollapseServiceRegex, " ")
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
         return normalized?.let { "grab:${sbn.packageName}:$it" }
@@ -898,7 +902,7 @@ class NotificationReaderService : NotificationListenerService() {
     private fun etaMinutesOrNull(etaText: String?): Int? {
         val t = etaText?.trim().orEmpty()
         if (!t.endsWith("menit", ignoreCase = true)) return null
-        return Regex("\\d+").find(t)?.value?.toIntOrNull()?.takeIf { it in 1..240 }
+        return digitsServiceRegex.find(t)?.value?.toIntOrNull()?.takeIf { it in 1..240 }
     }
 
     private fun handlePostNotificationSideEffects(originalKey: String, bridgeId: Int, config: IslandConfig, type: NotificationType, isLiveUpdate: Boolean, sbn: StatusBarNotification? = null, title: String = "", text: String = "") {
@@ -1898,9 +1902,8 @@ class NotificationReaderService : NotificationListenerService() {
     }
 
     private fun extractTextPercentage(title: String?, text: String?): Int? {
-        val pattern = Regex("""\b(\d{1,3})\s*%""")
-        val textMatch = text?.let { pattern.find(it) }
-        val titleMatch = title?.let { pattern.find(it) }
+        val textMatch = text?.let { percentServiceRegex.find(it) }
+        val titleMatch = title?.let { percentServiceRegex.find(it) }
         val match = textMatch ?: titleMatch
         if (match != null) {
             val value = match.groupValues[1].toIntOrNull()

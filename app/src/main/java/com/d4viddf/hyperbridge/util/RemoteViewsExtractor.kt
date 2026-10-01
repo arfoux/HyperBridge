@@ -19,9 +19,14 @@ object RemoteViewsExtractor {
      * Mendukung ID (Shopee) + EN (Grab: "In the kitchen", "is here", "on the way").
      * Sumber kebenaran tunggal — dipakai translator dan test.
      */
+    private val etaEstimateRegex = Regex("tiba\\s+pada\\s+\\d{1,2}[.:]\\d{2}|estimasi\\s+tiba|tiba\\s+dalam|arriving\\s+in|arriving\\s+at|eta\\s+\\d")
+    private val whitespaceCollapseRegex = Regex("\\s+")
+    private val packageLikeRegex = Regex("[a-z]+\\.[a-z.]+")
+    private val digitsRegex = Regex("\\d+")
+    private val rangeDashRegex = "\\s*-\\s*".toRegex()
     fun deliveryStage(corpusRaw: String): Int? {
         val corpus = corpusRaw.lowercase()
-        val etaEstimate = Regex("tiba\\s+pada\\s+\\d{1,2}[.:]\\d{2}|estimasi\\s+tiba|tiba\\s+dalam|arriving\\s+in|arriving\\s+at|eta\\s+\\d").containsMatchIn(corpus)
+        val etaEstimate = etaEstimateRegex.containsMatchIn(corpus)
         return when {
             corpus.contains("selamat menikmati") || corpus.contains("sudah tiba") ||
                 corpus.contains("telah tiba") || corpus.contains("selesai") ||
@@ -167,7 +172,7 @@ object RemoteViewsExtractor {
                     sb.append(t)
                 }
             }
-            val out = sb.toString().replace(Regex("\\s+"), " ").trim()
+            val out = sb.toString().replace(whitespaceCollapseRegex, " ").trim()
             if (out.isEmpty()) {
                 if (debug) android.util.Log.w("HyperBridgeDebug", "RV-EXTRACT empty corpus key=${sbn.key} rvCount=${candidates.size}")
                 null
@@ -243,7 +248,7 @@ object RemoteViewsExtractor {
                         if (s.isEmpty() || s.length > 300) continue
                         if (s == methodName) continue
                         // filter package name yang keikut (jarang)
-                        if (s.matches(Regex("[a-z]+\\.[a-z.]+"))) continue
+                        if (s.matches(packageLikeRegex)) continue
                         value = v
                         break
                     }
@@ -319,7 +324,7 @@ object RemoteViewsExtractor {
             // Bersihkan view agar tidak leak
             try { (view.parent as? android.view.ViewGroup)?.removeView(view) } catch (_: Exception) {}
             val dt = android.os.SystemClock.elapsedRealtime() - t0
-            val out = sb.toString().replace(Regex("\\s+"), " ").trim()
+            val out = sb.toString().replace(whitespaceCollapseRegex, " ").trim()
             if (debug) android.util.Log.w("HyperBridgeDebug", "RV-INFLATE ok dt=${dt}ms corpus='${out.take(180)}'")
             if (out.isEmpty()) null else out
         } catch (e: Exception) {
@@ -343,7 +348,7 @@ object RemoteViewsExtractor {
         // 1. Menit tertulis menang.
         val minuteMatch = all.firstOrNull { it.matches(minuteRegex) }
         if (minuteMatch != null) {
-            val n = Regex("\\d+").find(minuteMatch)?.value?.toIntOrNull()
+            val n = digitsRegex.find(minuteMatch)?.value?.toIntOrNull()
             if (n != null) return "$n menit"
             return minuteMatch
         }
@@ -378,7 +383,7 @@ object RemoteViewsExtractor {
 
     private fun parseRangeEnd(range: String): Int? {
         val normalized = range.replace("–", "-").replace("—", "-")
-        val parts = normalized.split("\\s*-\\s*".toRegex())
+        val parts = normalized.split(rangeDashRegex)
         if (parts.size != 2) return null
         return parseTimePart(parts[1].trim().replace(".", ":"))
     }
@@ -386,7 +391,7 @@ object RemoteViewsExtractor {
     /** Durasi range dalam menit (ujung - awal), mis. "08:52 - 09:02" -> 10. */
     private fun parseTimeRangeDuration(timeRange: String): Int? {
         val normalized = timeRange.replace("–", "-").replace("—", "-")
-        val parts = normalized.split("\\s*-\\s*".toRegex())
+        val parts = normalized.split(rangeDashRegex)
         if (parts.size != 2) return null
         val start = parseTimePart(parts[0].trim().replace(".", ":"))
         val end = parseTimePart(parts[1].trim().replace(".", ":"))

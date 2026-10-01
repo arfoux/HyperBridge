@@ -193,7 +193,7 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Grab: title/text extras NULL semua — isi hanya di RemoteViews (customView).
         // Jalur RV disediakan via forcedRvCorpus oleh caller async (NotificationReaderService);
         // di sini title/text/RV digabung jadi satu korpus agar stage+ETA tetap kep baca.
-        val rvExtra = forcedRvCorpus.orEmpty()
+        val rvExtra = if (isGrab) forcedRvCorpus.orEmpty() else ""
         // Isi shade dari korpus RV bila teks extras kosong (Grab live-activity: title sudah
         // keisi generik "Food & Delivery" tapi text tetap kosong — korpus RV = satu-satunya isi).
         if (text.isEmpty() && rvExtra.isNotBlank()) {
@@ -209,8 +209,10 @@ class DeliveryTranslator(context: Context, repo: ThemeRepository) : BaseTranslat
         // Nama resto (Grab EN) + label waktu mentah — dipakai shade (detail) agar
         // pill tetap minimal. Contoh REAL: "Your order from Burjo Titik Kumpul -
         // Tembalang is on the way to you." Judul penuh (spek final) = nama utuh.
-        val restoShort = com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(stageCorpus)
-            ?.trim()?.takeIf { it.isNotEmpty() }
+        val restoShort = if (isGrab) {
+            com.d4viddf.hyperbridge.util.RemoteViewsExtractor.extractRestoName(stageCorpus)
+                ?.trim()?.takeIf { it.isNotEmpty() }
+        } else null
         // Live-activity Grab tak bawa resto di korpusnya — pinjam ingatan terakhir
         // dari Transaction/chat order yang sama (diisi service sebelum gate apa pun).
         val cachedResto = restoShort ?: if (isGrab) peekResto(sbn.packageName) else null
